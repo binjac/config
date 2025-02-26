@@ -1,6 +1,6 @@
 # Zsh Environment Setup
 
-This script installs and configures Oh My Zsh, Antigen, Autojump, and fzf in a single step.
+This script installs and configures Oh My Zsh, Antigen, Autojump, fzf, SSH agent, my theme, etc...
 
 ## Installation
 ```sh

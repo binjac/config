@@ -44,6 +44,7 @@ export ZSH="\$HOME/.oh-my-zsh"
 # Set name of the theme to load
 ZSH_THEME="eastwood"
 
+
 #### Antigen ####
 # Load Antigen
 source ~/.antigen.zsh
@@ -66,6 +67,7 @@ antigen apply
 # Load Oh My Zsh
 source \$ZSH/oh-my-zsh.sh
 
+
 #### SSH Agent ####
 # SSH Agent Setup
 export SSH_AUTO_SPAWN="yes"
@@ -77,8 +79,8 @@ if [ -z "\$SSH_AUTH_SOCK" ]; then
   ssh-add ~/.ssh/id_rsa ~/.ssh/id_ed25519 2>/dev/null
 fi
 
-#### User configuration ####
 
+#### User configuration ####
 # Autojump
 if [ -f /usr/share/autojump/autojump.zsh ]; then
     source /usr/share/autojump/autojump.zsh

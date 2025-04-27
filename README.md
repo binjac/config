@@ -8,5 +8,7 @@ git clone https://github.com/binjac/install.git ~/install
 cd ~/install
 chmod +x install_update_zsh.sh
 ./install_update_zsh.sh
+cd ~
+rm -rf ~/install
 exec zsh
 ```

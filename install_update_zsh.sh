@@ -72,12 +72,12 @@ antigen use oh-my-zsh
 antigen bundle git
 antigen bundle zsh-users/zsh-autosuggestions
 antigen bundle zsh-users/zsh-history-substring-search
-antigen bundle zsh-users/zsh-syntax-highlighting
 antigen bundle djui/alias-tips
 antigen bundle rupa/z
 antigen bundle junegunn/fzf
 antigen bundle ssh-agent
 antigen bundle Aloxaf/fzf-tab
+antigen bundle zsh-users/zsh-syntax-highlighting
 
 antigen apply
 

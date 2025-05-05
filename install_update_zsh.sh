@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 echo "Setting up Zsh environment safely..."
 
 # Detect OS
@@ -28,72 +30,76 @@ else
     echo "Oh My Zsh already installed."
 fi
 
-# Install Antigen
+# Install or update Antigen
 echo "Installing/Updating Antigen..."
-curl -L git.io/antigen > ~/.antigen.zsh
+curl -L git.io/antigen > "$HOME/.antigen.zsh"
 
 # Install or update fzf
 if [ ! -d "$HOME/.fzf" ]; then
     echo "Installing fzf..."
-    git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
-    ~/.fzf/install --all
+    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
+    "$HOME/.fzf/install" --all
 else
     echo "Updating fzf..."
-    cd ~/.fzf && git pull && ./install --all
+    cd "$HOME/.fzf" && git pull && ./install --all
 fi
 
-# Use $HOME/config not $HOME/install
-DOTFILES="$HOME/config"
+# Set Zsh as default shell if not already
+if [ "$SHELL" != "$(which zsh)" ]; then
+    chsh -s "$(which zsh)"
+    echo "Default shell changed to zsh. Log out and log in again for changes to take effect."
+fi
 
-echo "Appending Zsh configuration to .zshrc..."
+# Block to append to .zshrc
+ZSHRC_BLOCK_START="#### --- Custom Zsh Setup from binjac/config --- ####"
+ZSHRC_BLOCK_END="#### --- End Custom Zsh Setup --- ####"
 
-cat << 'EOF' >> ~/.zshrc
+# Remove previous block if present
+sed -i.bak "/$ZSHRC_BLOCK_START/,/$ZSHRC_BLOCK_END/d" "$HOME/.zshrc"
 
+cat << 'EOF' >> "$HOME/.zshrc"
 #### --- Custom Zsh Setup from binjac/config --- ####
 
 # Path to Oh My Zsh
 export ZSH="$HOME/.oh-my-zsh"
-
 ZSH_THEME="eastwood"
 
 # Load Antigen
-source ~/.antigen.zsh
-
+source "$HOME/.antigen.zsh"
 antigen use oh-my-zsh
 
-# Load plugins
+# Load plugins (load fzf before fzf-tab, syntax-highlighting last)
 antigen bundle git
 antigen bundle zsh-users/zsh-autosuggestions
+antigen bundle zsh-users/zsh-history-substring-search
 antigen bundle zsh-users/zsh-syntax-highlighting
 antigen bundle djui/alias-tips
 antigen bundle rupa/z
 antigen bundle junegunn/fzf
 antigen bundle ssh-agent
-antigen bundle zsh-users/zsh-history-substring-search
+antigen bundle Aloxaf/fzf-tab
 
 antigen apply
 
 # Load Oh My Zsh
-source $ZSH/oh-my-zsh.sh
+source "$ZSH/oh-my-zsh.sh"
 
 #### SSH Agent ####
-
 export SSH_AUTO_SPAWN="yes"
 export SSH_USE_STRICT_MODE="no"
-export SSH_ADD_KEYS="~/.ssh/id_rsa ~/.ssh/id_ed25519"
+export SSH_ADD_KEYS="$HOME/.ssh/id_rsa $HOME/.ssh/id_ed25519"
 
 if [ -z "$SSH_AUTH_SOCK" ]; then
   eval "$(ssh-agent -s)" > /dev/null
-  ssh-add ~/.ssh/id_rsa ~/.ssh/id_ed25519 2>/dev/null
+  ssh-add "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" 2>/dev/null
 fi
 
 #### User configuration ####
-
 # Autojump
 [ -f /usr/share/autojump/autojump.zsh ] && source /usr/share/autojump/autojump.zsh
 
 # fzf
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+[ -f "$HOME/.fzf.zsh" ] && source "$HOME/.fzf.zsh"
 
 # Personal Aliases
 alias zshconfig="nano ~/.zshrc"
@@ -102,9 +108,17 @@ alias ohmyzsh="nano ~/.oh-my-zsh"
 # Enable history timestamps
 HIST_STAMPS="yyyy-mm-dd"
 
+# fzf-tab UI settings
+zstyle ':completion:*:descriptions' format '[%d]'
+zstyle ':completion:*:messages' format '%d'
+zstyle ':completion:*:warnings' format 'No matches for: %d'
+zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
+zstyle ':fzf-tab:complete:_zlua:*' query-string input
+zstyle ':fzf-tab:*' fzf-preview 'head -200 {}'
+
 EOF
 
 echo "Reloading Zsh configuration..."
-source ~/.zshrc
+source "$HOME/.zshrc" || true
 
 echo "✅ Zsh setup complete! Restart your terminal or run 'exec zsh' to apply changes."

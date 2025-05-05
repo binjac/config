@@ -2,27 +2,29 @@
 
 set -e
 
-echo "Setting up Zsh environment safely..."
+echo "🔧 Setting up Zsh environment..."
 
-# Detect OS
+# Detect OS type
 OS_TYPE=$(uname)
 
-# Install system dependencies
+# Install dependencies
 if [[ "$OS_TYPE" == "Linux" ]]; then
     echo "Updating system packages..."
-    sudo apt update && sudo apt install -y zsh git curl autojump fzf
+    sudo apt update
+    sudo apt install -y zsh git curl autojump fzf eza
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
     echo "Updating Homebrew packages..."
-    brew update && brew install zsh git autojump fzf
+    brew update
+    brew install zsh git autojump fzf eza
 fi
 
-# Backup existing .zshrc
+# Backup existing .zshrc if present
 if [ -f "$HOME/.zshrc" ]; then
     echo "Backing up existing .zshrc to .zshrc.backup..."
     cp "$HOME/.zshrc" "$HOME/.zshrc.backup"
 fi
 
-# Install Oh My Zsh if not installed
+# Install Oh My Zsh if not present
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     echo "Installing Oh My Zsh..."
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" --unattended
@@ -50,25 +52,24 @@ if [ "$SHELL" != "$(which zsh)" ]; then
     echo "Default shell changed to zsh. Log out and log in again for changes to take effect."
 fi
 
-# Block to append to .zshrc
-ZSHRC_BLOCK_START="#### --- Custom Zsh Setup from binjac/config --- ####"
-ZSHRC_BLOCK_END="#### --- End Custom Zsh Setup --- ####"
+# Remove any previous custom block in .zshrc
+ZSHRC_BLOCK_START="#### --- Managed by binjac/config install_update_zsh.sh --- ####"
+ZSHRC_BLOCK_END="#### --- End managed block --- ####"
+sed -i.bak "/$ZSHRC_BLOCK_START/,/$ZSHRC_BLOCK_END/d" "$HOME/.zshrc" || true
 
-# Remove previous block if present
-sed -i.bak "/$ZSHRC_BLOCK_START/,/$ZSHRC_BLOCK_END/d" "$HOME/.zshrc"
-
+# Append new config block
 cat << 'EOF' >> "$HOME/.zshrc"
-#### --- Custom Zsh Setup from binjac/config --- ####
+#### --- Managed by binjac/config install_update_zsh.sh --- ####
 
-# Path to Oh My Zsh
+# Oh My Zsh
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="eastwood"
 
-# Load Antigen
-source "$HOME/.antigen.zsh"
+# Antigen
+source $HOME/.antigen.zsh
 antigen use oh-my-zsh
 
-# Load plugins (load fzf before fzf-tab, syntax-highlighting last)
+# Plugins
 antigen bundle git
 antigen bundle zsh-users/zsh-autosuggestions
 antigen bundle zsh-users/zsh-history-substring-search
@@ -79,16 +80,16 @@ antigen bundle ssh-agent
 antigen bundle Aloxaf/fzf-tab
 antigen bundle zsh-users/zsh-syntax-highlighting
 
+# Apply Antigen
 antigen apply
 
-# Load Oh My Zsh
-source "$ZSH/oh-my-zsh.sh"
+# Oh My Zsh core
+source $ZSH/oh-my-zsh.sh
 
 #### SSH Agent ####
 export SSH_AUTO_SPAWN="yes"
 export SSH_USE_STRICT_MODE="no"
 export SSH_ADD_KEYS="$HOME/.ssh/id_rsa $HOME/.ssh/id_ed25519"
-
 if [ -z "$SSH_AUTH_SOCK" ]; then
   eval "$(ssh-agent -s)" > /dev/null
   ssh-add "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" 2>/dev/null
@@ -96,26 +97,31 @@ fi
 
 #### User configuration ####
 # Autojump
-[ -f /usr/share/autojump/autojump.zsh ] && source /usr/share/autojump/autojump.zsh
+if [ -f /usr/share/autojump/autojump.zsh ]; then
+    source /usr/share/autojump/autojump.zsh
+fi
 
-# fzf
-[ -f "$HOME/.fzf.zsh" ] && source "$HOME/.fzf.zsh"
+# fzf setup (only if installed)
+[ -f $HOME/.fzf.zsh ] && source $HOME/.fzf.zsh
 
-# Personal Aliases
+# Aliases
 alias zshconfig="nano ~/.zshrc"
 alias ohmyzsh="nano ~/.oh-my-zsh"
 
-# Enable history timestamps
+# History timestamps
 HIST_STAMPS="yyyy-mm-dd"
 
-# fzf-tab UI settings
+#### fzf-tab UI settings ####
+zstyle ':completion:*:git-checkout:*' sort false
 zstyle ':completion:*:descriptions' format '[%d]'
-zstyle ':completion:*:messages' format '%d'
-zstyle ':completion:*:warnings' format 'No matches for: %d'
 zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
-zstyle ':fzf-tab:complete:_zlua:*' query-string input
-zstyle ':fzf-tab:*' fzf-preview 'head -200 {}'
+zstyle ':completion:*' menu no
+zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always $realpath'
+zstyle ':fzf-tab:*' fzf-flags --color=fg:1,fg+:2 --bind=tab:accept
+zstyle ':fzf-tab:*' use-fzf-default-opts yes
+zstyle ':fzf-tab:*' switch-group '<' '>'
 
+#### --- End managed block --- ####
 EOF
 
 echo "Reloading Zsh configuration..."

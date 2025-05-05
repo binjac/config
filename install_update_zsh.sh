@@ -65,6 +65,7 @@ antigen bundle djui/alias-tips
 antigen bundle rupa/z
 antigen bundle junegunn/fzf
 antigen bundle ssh-agent
+antigen bundle zsh-users/zsh-history-substring-search
 
 antigen apply
 

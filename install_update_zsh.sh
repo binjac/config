@@ -32,7 +32,7 @@ fi
 echo "Installing/Updating Antigen..."
 curl -L git.io/antigen > ~/.antigen.zsh
 
-# Install fzf if not installed
+# Install or update fzf
 if [ ! -d "$HOME/.fzf" ]; then
     echo "Installing fzf..."
     git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
@@ -42,19 +42,23 @@ else
     cd ~/.fzf && git pull && ./install --all
 fi
 
-# Add custom Zsh configuration
+# Use $HOME/config not $HOME/install
+DOTFILES="$HOME/config"
+
 echo "Appending Zsh configuration to .zshrc..."
 
 cat << 'EOF' >> ~/.zshrc
 
-#### --- Custom Zsh Setup from binjac/install --- ####
+#### --- Custom Zsh Setup from binjac/config --- ####
 
 # Path to Oh My Zsh
 export ZSH="$HOME/.oh-my-zsh"
+
 ZSH_THEME="eastwood"
 
 # Load Antigen
 source ~/.antigen.zsh
+
 antigen use oh-my-zsh
 
 # Load plugins
@@ -72,7 +76,8 @@ antigen apply
 # Load Oh My Zsh
 source $ZSH/oh-my-zsh.sh
 
-# SSH Agent setup
+#### SSH Agent ####
+
 export SSH_AUTO_SPAWN="yes"
 export SSH_USE_STRICT_MODE="no"
 export SSH_ADD_KEYS="~/.ssh/id_rsa ~/.ssh/id_ed25519"
@@ -81,6 +86,8 @@ if [ -z "$SSH_AUTH_SOCK" ]; then
   eval "$(ssh-agent -s)" > /dev/null
   ssh-add ~/.ssh/id_rsa ~/.ssh/id_ed25519 2>/dev/null
 fi
+
+#### User configuration ####
 
 # Autojump
 [ -f /usr/share/autojump/autojump.zsh ] && source /usr/share/autojump/autojump.zsh

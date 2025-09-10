@@ -2,6 +2,16 @@
 
 This repo bootstraps a consistent Zsh+iTerm2 environment on macOS or Linux.
 
+## Installation
+```sh
+git clone https://github.com/binjac/config.git ~/config
+cd ~/config
+chmod +x install_update_zsh.sh
+./install_update_zsh.sh
+cd ~
+rm -rf ~/config
+exec zsh
+```
 
 ### Prompt: Oh My Posh
 

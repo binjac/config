@@ -1,53 +1,52 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-echo "Setting up Zsh environment safely..."
+echo "Setting up Zsh environment..."
 
-# Detect OS
-OS_TYPE=$(uname)
+OS_TYPE="$(uname)"
 
-# Install system dependencies
+# ------------------------------ Base deps --------------------------------------
 if [[ "$OS_TYPE" == "Linux" ]]; then
-    echo "Updating system packages..."
-    sudo apt update && sudo apt install -y zsh git curl autojump fzf
+  echo "Updating system packages..."
+  sudo apt update
+  sudo apt install -y zsh git curl autojump fzf || true
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    echo "Updating Homebrew packages..."
-    brew update && brew install zsh git autojump fzf
+  echo "Updating Homebrew packages..."
+  brew update
+  brew install zsh git autojump fzf
 fi
 
-# Backup existing .zshrc
-if [ -f "$HOME/.zshrc" ]; then
-    echo "Backing up existing .zshrc to .zshrc.backup..."
-    cp "$HOME/.zshrc" "$HOME/.zshrc.backup"
+# ------------------------------ Backup zshrc -----------------------------------
+if [[ -f "$HOME/.zshrc" ]]; then
+  echo "Backing up existing .zshrc -> ~/.zshrc.backup"
+  cp "$HOME/.zshrc" "$HOME/.zshrc.backup"
 fi
 
-#### Install Oh My Zsh if not installed ####
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    echo "Installing Oh My Zsh..."
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" --unattended
+# ------------------------------ Oh My Zsh --------------------------------------
+if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
+  echo "Installing Oh My Zsh (unattended)..."
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" --unattended
 else
-    echo "Oh My Zsh already installed."
+  echo "Oh My Zsh already installed."
 fi
 
-#### Install Antigen ####
+# ------------------------------ Antigen ----------------------------------------
 echo "Installing/Updating Antigen..."
 curl -fsSL https://git.io/antigen > "$HOME/.antigen.zsh"
 
-#### Install or update fzf ####
-if [ ! -d "$HOME/.fzf" ]; then
-    echo "Installing fzf..."
-    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
-    "$HOME/.fzf/install" --all
+# ------------------------------ fzf --------------------------------------------
+if [[ ! -d "$HOME/.fzf" ]]; then
+  echo "Installing fzf..."
+  git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
+  "$HOME/.fzf/install" --all
 else
-    echo "Updating fzf..."
-    (cd "$HOME/.fzf" && git pull && ./install --all)
+  echo "Updating fzf..."
+  (cd "$HOME/.fzf" && git pull && ./install --all)
 fi
 
-#### Install Oh My Posh ####
+# ------------------------------ Oh My Posh -------------------------------------
 if [[ "$OS_TYPE" == "Darwin" ]]; then
-  # Install oh-my-posh + Nerd Font (for icons)
   brew list --formula oh-my-posh >/dev/null 2>&1 || brew install oh-my-posh
-  brew tap homebrew/cask-fonts >/dev/null 2>&1 || true
   brew list --cask font-meslo-lg-nerd-font >/dev/null 2>&1 || brew install --cask font-meslo-lg-nerd-font
 elif [[ "$OS_TYPE" == "Linux" ]]; then
   if ! command -v oh-my-posh >/dev/null 2>&1; then
@@ -56,6 +55,7 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
   fi
 fi
 
+# ------------------------------ Write .zshrc -----------------------------------
 echo "Creating new .zshrc with your configuration..."
 
 cat > ~/.zshrc << 'EOF'
@@ -63,16 +63,13 @@ cat > ~/.zshrc << 'EOF'
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
 
 #### Oh My Zsh ####
-# Path to Oh My Zsh installation
 export ZSH="$HOME/.oh-my-zsh"
 # Disable OMZ prompt; oh-my-posh will render it
 ZSH_THEME=""
 
 #### Antigen ####
-# Load Antigen
 source "$HOME/.antigen.zsh"
 
-# Use Oh My Zsh plugins
 antigen use oh-my-zsh
 
 # Load plugins (fzf-tab after fzf, syntax-highlighting last)
@@ -92,7 +89,7 @@ antigen apply
 # Load Oh My Zsh
 source "$ZSH/oh-my-zsh.sh"
 
-# Oh My Posh theme (Kushal; use stable main raw URL)
+# Oh My Posh theme (Kushal)
 eval "$(oh-my-posh init zsh --config https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json)"
 
 #### SSH Agent ####
@@ -102,7 +99,7 @@ export SSH_ADD_KEYS="$HOME/.ssh/id_rsa $HOME/.ssh/id_ed25519"
 
 if [ -z "$SSH_AUTH_SOCK" ]; then
   eval "$(ssh-agent -s)" > /dev/null
-  ssh-add "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" 2>/dev/null
+  ssh-add "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" 2>/dev/null || true
 fi
 
 #### User configuration ####
@@ -114,11 +111,11 @@ fi
 # fzf setup (only if installed)
 [ -f "$HOME/.fzf.zsh" ] && source "$HOME/.fzf.zsh"
 
-# Set personal aliases
+# Aliases
 alias zshconfig="nano ~/.zshrc"
 alias ohmyzsh="nano ~/.oh-my-zsh"
 
-# Enable history timestamps
+# History timestamps
 HIST_STAMPS="yyyy-mm-dd"
 
 #### fzf-tab UI settings ####
@@ -132,7 +129,6 @@ zstyle ':fzf-tab:*' use-fzf-default-opts yes
 zstyle ':fzf-tab:*' switch-group '<' '>'
 
 # >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
 if [[ -f "$HOME/anaconda3/bin/conda" ]]; then
     __conda_setup="$('$HOME/anaconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
     if [ $? -eq 0 ]; then
@@ -149,17 +145,12 @@ fi
 # <<< conda initialize <<<
 EOF
 
-# Install eza if not installed (for fzf-tab preview)
+# ------------------------------ Extras -----------------------------------------
+# eza for previews
 if [[ "$OS_TYPE" == "Linux" ]]; then
-    if ! command -v eza &> /dev/null; then
-        echo "Installing eza for directory previews..."
-        sudo apt install -y eza || echo "eza not available in repositories. You may need to install it manually."
-    fi
+  command -v eza >/dev/null 2>&1 || sudo apt install -y eza || true
 elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    if ! command -v eza &> /dev/null; then
-        echo "Installing eza for directory previews..."
-        brew install eza
-    fi
+  command -v eza >/dev/null 2>&1 || brew install eza
 fi
 
 # Enable live reload if OMP present
@@ -167,9 +158,64 @@ if command -v oh-my-posh >/dev/null 2>&1; then
   oh-my-posh enable reload >/dev/null 2>&1 || true
 fi
 
+# ------------------------------ macOS profiles ---------------------------------
+if [[ "$OS_TYPE" == "Darwin" ]]; then
+  echo "Configuring terminal profiles (iTerm2 & Terminal.app)..."
+
+  # iTerm2 Dynamic Profile
+  ITERM_SRC_JSON="${PWD}/terminal_config/Custom.json"
+  ITERM_DEST_DIR="$HOME/Library/Application Support/iTerm2/DynamicProfiles"
+  if [[ -f "$ITERM_SRC_JSON" ]]; then
+    mkdir -p "$ITERM_DEST_DIR"
+    cp -f "$ITERM_SRC_JSON" "$ITERM_DEST_DIR/Custom.json"
+    ITERM_GUID="$('/usr/bin/python3' - <<'PY'
+import json,sys
+p=json.load(open(sys.argv[1]))
+print(p.get("Guid",""))
+PY
+"$ITERM_SRC_JSON")"
+    if [[ -n "$ITERM_GUID" ]]; then
+      defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$ITERM_GUID"
+      echo "iTerm2: Dynamic profile installed and set default (Guid=$ITERM_GUID)."
+    else
+      echo "iTerm2: Warning - no Guid found in Custom.json; profile copied but not set default."
+    fi
+  else
+    echo "iTerm2: Skipped (terminal_config/Custom.json not found)."
+  fi
+
+  # Apple Terminal profile (.terminal)
+  TERM_SRC_FILE="${PWD}/terminal_config/Custom.terminal"
+  if [[ -f "$TERM_SRC_FILE" ]]; then
+    /usr/bin/open -g "$TERM_SRC_FILE" || true
+    TERM_PROFILE_NAME="$('/usr/bin/plutil' -convert json -o - "$TERM_SRC_FILE" 2>/dev/null | /usr/bin/python3 - <<'PY'
+import json,sys
+data=json.load(sys.stdin)
+ws=data.get("Window Settings",{})
+print(next(iter(ws.keys()),""))
+PY
+)"
+    if [[ -n "$TERM_PROFILE_NAME" ]]; then
+      defaults write com.apple.Terminal "Default Window Settings" -string "$TERM_PROFILE_NAME"
+      defaults write com.apple.Terminal "Startup Window Settings" -string "$TERM_PROFILE_NAME"
+      echo "Terminal.app: Profile '$TERM_PROFILE_NAME' imported and set as default."
+    else
+      echo "Terminal.app: Warning - could not detect profile name in Custom.terminal."
+    fi
+  else
+    echo "Terminal.app: Skipped (terminal_config/Custom.terminal not found)."
+  fi
+
+  # Nudge apps to reload next launch (safe if not running)
+  killall iTerm2  >/dev/null 2>&1 || true
+  killall Terminal >/dev/null 2>&1 || true
+  echo "Profiles configured. Reopen iTerm2/Terminal to apply."
+fi
+
+# ------------------------------ Done -------------------------------------------
 echo "Reloading Zsh configuration..."
 # shellcheck disable=SC1090
-source ~/.zshrc || echo "Configuration will be applied when you restart your terminal."
+source "$HOME/.zshrc" || echo "Configuration will be applied when you restart your terminal."
 
 echo "✅ Zsh setup complete! Your configuration has been deployed."
 echo "Restart your terminal or run 'exec zsh' to apply all changes."

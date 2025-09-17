@@ -339,7 +339,7 @@
     "Green Component" : 0.23660069704055786
   },
   "Name" : "Custom",
-  "Transparency" : 0,
+  "Transparency" : 0.028314732142857138,
   "Horizontal Spacing" : 1,
   "Cursor Color (Dark)" : {
     "Red Component" : 0.99997633695602417,
@@ -504,7 +504,7 @@
     "Alpha Component" : 1,
     "Green Component" : 0.7607843279838562
   },
-  "Normal Font" : "MesloLGSNFM-Regular 13",
+  "Normal Font" : "MesloLGMNFM-Regular 13",
   "Unlimited Scrollback" : false,
   "Ansi 12 Color (Light)" : {
     "Red Component" : 0.65349078178405762,

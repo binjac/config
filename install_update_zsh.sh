@@ -18,7 +18,11 @@ ask() {
   local prompt default reply
   prompt="$1"; default="${2:-Y}"
   [[ "$default" =~ ^[Yy]$ ]] && prompt="$prompt [Y/n] " || prompt="$prompt [y/N] "
-  read -r -p "$prompt" reply || true
+  if [[ "${INSTALL_MODE:-}" == "FULL" ]]; then
+    reply="$default"
+  else
+    read -r -p "$prompt" reply || true
+  fi
   reply="${reply:-$default}"
   case "$reply" in [Yy]*) return 0 ;; *) return 1 ;; esac
 }
@@ -29,11 +33,36 @@ ensure_brew() {
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
       eval "$(/opt/homebrew/bin/brew shellenv)"
+    else
+      echo "Homebrew not installed; skipping Homebrew-dependent steps."
     fi
   fi
 }
-install_pkg_brew() { ensure_brew; brew list --formula "$1" >/dev/null 2>&1 || brew install "$1"; }
-install_cask_brew() { ensure_brew; brew list --cask "$1" >/dev/null 2>&1 || brew install --cask "$1"; }
+install_pkg_brew() {
+  ensure_brew
+  if command -v brew >/dev/null 2>&1; then
+    brew list --formula "$1" >/dev/null 2>&1 || brew install "$1"
+  else
+    echo "brew not found; skipping formula '$1'"
+  fi
+}
+install_cask_brew() {
+  ensure_brew
+  if command -v brew >/dev/null 2>&1; then
+    brew list --cask "$1" >/dev/null 2>&1 || brew install --cask "$1"
+  else
+    echo "brew not found; skipping cask '$1'"
+  fi
+}
+
+# ------------------------------ Install mode -------------------------------------
+if ask "Use FULL install mode (auto-accept defaults)?" "Y"; then
+  INSTALL_MODE="FULL"
+  echo "Mode: FULL (auto-accepting defaults)"
+else
+  INSTALL_MODE="CUSTOM"
+  echo "Mode: CUSTOM (interactive prompts)"
+fi
 
 # ------------------------------ Base deps (optional) ---------------------------
 if ask "Install/Update base dependencies (zsh git curl autojump fzf)?" "Y"; then
@@ -41,12 +70,15 @@ if ask "Install/Update base dependencies (zsh git curl autojump fzf)?" "Y"; then
     sudo apt update || true
     sudo apt install -y zsh git curl autojump fzf || true
   elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    ensure_brew
-    brew update || true
-    install_pkg_brew zsh || true
-    install_pkg_brew git || true
-    install_pkg_brew autojump || true
-    install_pkg_brew fzf || true
+    if command -v brew >/dev/null 2>&1; then
+      brew update || true
+      install_pkg_brew zsh || true
+      install_pkg_brew git || true
+      install_pkg_brew autojump || true
+      install_pkg_brew fzf || true
+    else
+      echo "Skipping base deps on macOS; Homebrew is not installed."
+    fi
   fi
 fi
 
@@ -354,7 +386,9 @@ if command -v oh-my-posh >/dev/null 2>&1; then
 fi
 
 # ------------------------------ Terminal/iTerm2 setup --------------------------
-if [[ "$OS_TYPE" == "Darwin" ]] && ask "Configure iTerm2 & Terminal.app profiles now?" "Y"; then
+iterm_prompt_default="Y"
+[[ "${INSTALL_MODE:-}" == "FULL" ]] && iterm_prompt_default="N"
+if [[ "$OS_TYPE" == "Darwin" ]] && ask "Configure iTerm2 & Terminal.app profiles now?" "$iterm_prompt_default"; then
   echo "Configuring terminal profiles..."
 
   # iTerm2 Dynamic Profile

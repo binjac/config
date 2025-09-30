@@ -98,6 +98,7 @@
 
   },
   "Visual Bell" : true,
+  "Only The Default BG Color Uses Transparency" : false,
   "Cursor Text Color" : {
     "Red Component" : 1,
     "Color Space" : "sRGB",
@@ -474,6 +475,7 @@
   "Tags" : [
 
   ],
+  "Blur Radius" : 4.0766657366071435,
   "Ansi 6 Color (Light)" : {
     "Red Component" : 0,
     "Color Space" : "sRGB",
@@ -541,7 +543,7 @@
     "Alpha Component" : 1,
     "Green Component" : 1
   },
-  "Blur" : false,
+  "Blur" : true,
   "Use Separate Colors for Light and Dark Mode" : true,
   "Background Color (Light)" : {
     "Red Component" : 0.97999999999999998,

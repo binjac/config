@@ -251,11 +251,11 @@
   },
   "Custom Command" : "No",
   "Background Color (Dark)" : {
-    "Red Component" : 0.16078431904315948,
+    "Red Component" : 0.10980392156862745,
     "Color Space" : "P3",
-    "Blue Component" : 0.20000000298023224,
+    "Blue Component" : 0.14509803921568629,
     "Alpha Component" : 1,
-    "Green Component" : 0.17254902422428131
+    "Green Component" : 0.12549019607843137
   },
   "Ansi 9 Color" : {
     "Red Component" : 0.8659515380859375,
@@ -340,7 +340,7 @@
     "Green Component" : 0.23660069704055786
   },
   "Name" : "Custom",
-  "Transparency" : 0.048314732142857156,
+  "Transparency" : 0.016328124999999985,
   "Horizontal Spacing" : 1,
   "Cursor Color (Dark)" : {
     "Red Component" : 0.99997633695602417,
@@ -545,6 +545,7 @@
   },
   "Blur" : true,
   "Use Separate Colors for Light and Dark Mode" : true,
+  "Initial Use Transparency" : true,
   "Background Color (Light)" : {
     "Red Component" : 0.97999999999999998,
     "Color Space" : "sRGB",

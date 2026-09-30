@@ -8,7 +8,9 @@ INSTALL_MODE="${INSTALL_MODE:-}"
 DRY_RUN="${DRY_RUN:-0}"
 ZSHRC_ONLY=0
 UPDATE=0
-SELECTION_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zsh-setup/selection.env"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zsh-setup"
+SELECTION_FILE="$CONFIG_DIR/selection.env"
+GLOSSARY_DEST="$CONFIG_DIR/glossary.tsv"
 ARGS=("$@")
 OMP_THEME_URL="${OMP_THEME_URL:-https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json}"
 OMP_THEME_NAME="$(basename "$OMP_THEME_URL")"
@@ -142,6 +144,13 @@ pick zoxide  "zoxide (smarter cd: z / zi)?" "Y"
 pick eza     "eza (fzf-tab directory preview)?" "Y"
 pick omp     "oh-my-posh prompt (theme: $OMP_THEME_NAME)?" "Y"
 pick font    "Meslo Nerd Font (glyphs for the prompt)?" "Y"
+pick bat     "bat (cat with syntax highlighting, fzf preview)?" "Y"
+pick fd      "fd (fast find, feeds fzf)?" "Y"
+pick atuin   "atuin (searchable shell history, owns Ctrl-R)?" "Y"
+pick delta   "git-delta (readable git diffs, via a git include file)?" "Y"
+pick lazygit "lazygit (git terminal UI, alias lg)?" "Y"
+pick mise    "mise (per-project tool versions: Java, Terraform, ...)?" "Y"
+pick direnv  "direnv (per-directory env vars via .envrc)?" "Y"
 
 echo; echo "== Zsh framework =="
 pick omz     "Oh My Zsh?" "Y"
@@ -166,6 +175,7 @@ conda_default="N"; [[ -d "$HOME/anaconda3" ]] && conda_default="Y"
 pick conda   "Conda init block (\$HOME/anaconda3)?" "$conda_default"
 pick vscode  "VS Code guard (skip prompt/plugins while VS Code resolves its env)?" "Y"
 pick usercfg "Personal aliases, history timestamps, key bindings?" "Y"
+pick zhelp   "zhelp command (glossary of aliases, keys and tools)?" "Y"
 
 if [[ "$OS_TYPE" == "Darwin" && "$ZSHRC_ONLY" == "0" ]]; then
   echo; echo "== Terminal apps =="
@@ -205,6 +215,14 @@ else
 fi
 unset __conda_setup
 # <<< conda initialize <<<
+EOF
+  fi
+
+  if sel mise; then cat <<'EOF'
+
+
+#### mise ####
+command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
 EOF
   fi
 
@@ -266,20 +284,53 @@ fi
 EOF
   fi
 
-  if sel fzf || sel zoxide || sel usercfg; then
-    printf '\n\n#### User configuration ####\n'
-    if sel fzf; then cat <<'EOF'
+  printf '\n\n#### User configuration ####\n'
+  if [[ "$OS_TYPE" == "Linux" ]]; then
+    if sel bat; then echo 'command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1 && alias bat=batcat'; fi
+    if sel fd;  then echo 'command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1 && alias fd=fdfind'; fi
+  fi
+  if sel fzf && sel fd; then cat <<'EOF'
+# fzf x fd: list files/dirs with fd (hidden files included, .git excluded)
+if command -v fd >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fd --type f --hidden --exclude .git'
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+  export FZF_ALT_C_COMMAND='fd --type d --hidden --exclude .git'
+fi
+EOF
+  fi
+  if sel fzf && sel bat; then cat <<'EOF'
+command -v bat >/dev/null 2>&1 && export FZF_CTRL_T_OPTS="--preview 'bat -n --color=always --line-range :200 {}'"
+EOF
+  fi
+  if sel fzf; then cat <<'EOF'
 # fzf setup
 [ -f $HOME/.fzf.zsh ] && source $HOME/.fzf.zsh
 EOF
-    fi
-    if sel zoxide; then cat <<'EOF'
+  fi
+  if sel zoxide; then cat <<'EOF'
 
 # zoxide (z / zi)
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 EOF
-    fi
-    if sel usercfg; then cat <<'EOF'
+  fi
+  if sel atuin; then cat <<'EOF'
+
+# atuin owns Ctrl-R (after fzf); Up/Down stay with history-substring-search
+command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh --disable-up-arrow)"
+EOF
+  fi
+  if sel direnv; then cat <<'EOF'
+
+# direnv (.envrc per directory)
+command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
+EOF
+  fi
+  if sel lazygit; then cat <<'EOF'
+
+alias lg=lazygit
+EOF
+  fi
+  if sel usercfg; then cat <<'EOF'
 
 # Set personal aliases
 alias zshconfig="nano ~/.zshrc"
@@ -288,13 +339,12 @@ alias ohmyzsh="nano ~/.oh-my-zsh"
 # Enable history timestamps
 HIST_STAMPS="yyyy-mm-dd"
 EOF
-      if sel p_histsub; then cat <<'EOF'
+    if sel p_histsub; then cat <<'EOF'
 
 # History substring search bindings (↑/↓)
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 EOF
-      fi
     fi
   fi
 
@@ -313,6 +363,26 @@ EOF
 zstyle ':fzf-tab:*' fzf-flags --color=fg:1,fg+:2 --bind=tab:accept
 zstyle ':fzf-tab:*' use-fzf-default-opts yes
 zstyle ':fzf-tab:*' switch-group '<' '>'
+EOF
+  fi
+
+  if sel zhelp; then cat <<'EOF'
+
+
+#### zhelp ####
+zhelp() {
+  local g="$HOME/.config/zsh-setup/glossary.tsv" fmt='{printf "%-6s %-26s %s\n", $2, $3, $4}'
+  [[ -f "$g" ]] || { echo "zhelp: $g missing (run install_update_zsh.sh --update)"; return 1; }
+  if [[ -n "$1" ]]; then
+    echo "-- glossary --"; grep -i -- "$*" "$g" | awk -F'\t' "$fmt"
+    echo "-- aliases --"; alias | grep -i -- "$*"
+    echo "-- functions --"; print -l ${(k)functions} | grep -v '^_' | grep -i -- "$*" | head -20
+  elif command -v fzf >/dev/null 2>&1; then
+    awk -F'\t' "$fmt" "$g" | fzf --prompt='zhelp> ' --no-sort
+  else
+    awk -F'\t' "$fmt" "$g" | ${PAGER:-less}
+  fi
+}
 EOF
   fi
 
@@ -394,6 +464,13 @@ if [[ "$ZSHRC_ONLY" == "0" ]]; then
   fi
 
   if sel eza; then pkg eza; fi
+  if sel bat; then pkg bat; fi
+  if sel fd; then pkg fd fd-find; fi
+  if sel atuin; then pkg atuin; fi
+  if sel delta; then pkg git-delta; fi
+  if sel lazygit; then pkg lazygit; fi
+  if sel mise; then pkg mise; fi
+  if sel direnv; then pkg direnv; fi
 
   if sel omp; then
     if [[ "$OS_TYPE" == "Darwin" ]]; then
@@ -408,8 +485,51 @@ if [[ "$ZSHRC_ONLY" == "0" ]]; then
   if sel font && [[ "$OS_TYPE" == "Darwin" ]]; then cask font-meslo-lg-nerd-font; fi
 fi
 
+sync_file() { # sync_file <src> <dest> <label>
+  if [[ -f "$2" ]] && cmp -s "$1" "$2"; then
+    echo "$3 already up to date."
+  elif dry; then
+    echo "[dry-run] $3 would be written to $2"
+  else
+    mkdir -p "$(dirname "$2")"; cp "$1" "$2"; echo "Wrote $3 ($2)"
+  fi
+}
+
+write_glossary() {
+  local tmp mod kind name desc
+  tmp="$(mktemp)"
+  while IFS=$'\t' read -r mod kind name desc; do
+    if [[ -z "$mod" || "$mod" == \#* ]]; then continue; fi
+    if [[ "$mod" == "core" ]] || sel "$mod"; then printf '%s\t%s\t%s\t%s\n' "$mod" "$kind" "$name" "$desc" >> "$tmp"; fi
+  done < "$REPO_DIR/share/glossary.tsv"
+  sync_file "$tmp" "$GLOSSARY_DEST" "zhelp glossary"
+  rm -f "$tmp"
+}
+
+setup_delta() {
+  local dest="$CONFIG_DIR/delta.gitconfig"
+  sync_file "$REPO_DIR/share/delta.gitconfig" "$dest" "delta git config"
+  if git config --global --get-all include.path 2>/dev/null | grep -qxF "$dest"; then
+    echo "  git include.path already set."
+  else
+    run git config --global --add include.path "$dest"
+  fi
+}
+
+import_atuin_history() {
+  if command -v atuin >/dev/null 2>&1 && [[ -f "$HOME/.zsh_history" && ! -f "$CONFIG_DIR/atuin-imported" ]]; then
+    run atuin import zsh
+    if ! dry; then mkdir -p "$CONFIG_DIR"; touch "$CONFIG_DIR/atuin-imported"; fi
+  fi
+}
+
 echo; echo "== Zsh config =="
 write_zshrc
+if sel zhelp; then write_glossary; fi
+if [[ "$ZSHRC_ONLY" == "0" ]]; then
+  if sel delta; then setup_delta; fi
+  if sel atuin; then import_atuin_history; fi
+fi
 
 # ------------------------------ Terminal apps ----------------------------------
 if sel iterm2; then

@@ -1,24 +1,66 @@
 #!/usr/bin/env bash
+# Modular Zsh + terminal bootstrap (macOS / Linux). Compatible with bash 3.2.
 set -euo pipefail
 
-echo "Setting up Zsh environment..."
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS_TYPE="$(uname)"
+INSTALL_MODE="${INSTALL_MODE:-}"
+DRY_RUN="${DRY_RUN:-0}"
+ZSHRC_ONLY=0
+UPDATE=0
+SELECTION_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zsh-setup/selection.env"
+ARGS=("$@")
+OMP_THEME_URL="${OMP_THEME_URL:-https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json}"
+OMP_THEME_NAME="$(basename "$OMP_THEME_URL")"
+ITERM_JSON="$REPO_DIR/terminal_config/Custom.json"
+TERMINAL_FILE="$REPO_DIR/terminal_config/Custom.terminal"
 
-# ------------------------------ Backup zshrc -----------------------------------
-if [[ -f "$HOME/.zshrc" ]]; then
-  echo "Backing up existing .zshrc -> ~/.zshrc.backup"
-  cp "$HOME/.zshrc" "$HOME/.zshrc.backup"
+usage() {
+  cat <<'EOF'
+Usage: ./install_update_zsh.sh [--full | --custom] [--update] [--zshrc-only] [--dry-run]
+  --full         accept the default answer to every question
+  --custom       ask about every module
+  --update       machine already set up: git pull this repo, reuse the modules saved on
+                 this machine, only ask about new ones, then re-apply everything
+  --zshrc-only   only regenerate ~/.zshrc (no install, no terminal setup)
+  --dry-run      change nothing: print actions and the diff of the generated ~/.zshrc
+EOF
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --full) INSTALL_MODE="FULL" ;;
+    --custom) INSTALL_MODE="CUSTOM" ;;
+    --zshrc-only) INSTALL_MODE="FULL"; ZSHRC_ONLY=1 ;;
+    --update) UPDATE=1 ;;
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+done
+
+# ------------------------------ Update: pull, then re-run the fresh script ------
+if [[ "$UPDATE" == "1" && "${UPDATE_PULLED:-0}" != "1" ]]; then
+  echo "Updating repo $REPO_DIR ..."
+  if [[ "$DRY_RUN" == "1" ]]; then echo "  [dry-run] git pull --ff-only"; git -C "$REPO_DIR" fetch -q origin || true
+  elif git -C "$REPO_DIR" pull --ff-only; then :; else echo "  ! pull failed (local changes or diverged history); continuing with the local copy" >&2; fi
+  UPDATE_PULLED=1 exec bash "$REPO_DIR/$(basename "${BASH_SOURCE[0]}")" "${ARGS[@]}"
 fi
-timestamp() { date +"%Y%m%d-%H%M%S"; }
-backup_file() { [[ -f "$1" ]] && cp -p "$1" "$1.bak.$(timestamp)" && echo "Backed up $1 -> $1.bak.$(timestamp)"; }
-write_file() { backup_file "$1"; printf "%s\n" "$2" > "$1"; echo "Wrote $1"; }
 
 # ------------------------------ Helpers ----------------------------------------
+dry() { [[ "$DRY_RUN" == "1" ]]; }
+timestamp() { date +"%Y%m%d-%H%M%S"; }
+
+run() {
+  if dry; then echo "  [dry-run] $*"; return 0; fi
+  "$@" || { echo "  ! failed: $*" >&2; return 0; }
+}
+
 ask() {
   local prompt default reply
   prompt="$1"; default="${2:-Y}"
-  [[ "$default" =~ ^[Yy]$ ]] && prompt="$prompt [Y/n] " || prompt="$prompt [y/N] "
-  if [[ "${INSTALL_MODE:-}" == "FULL" ]]; then
+  if [[ "$default" =~ ^[Yy]$ ]]; then prompt="$prompt [Y/n] "; else prompt="$prompt [y/N] "; fi
+  if [[ "$INSTALL_MODE" == "FULL" ]]; then
     reply="$default"
   else
     read -r -p "$prompt" reply || true
@@ -27,111 +69,173 @@ ask() {
   case "$reply" in [Yy]*) return 0 ;; *) return 1 ;; esac
 }
 
+# pick <id> <label> <Y|N>: records the answer in SEL_<id>
+pick() {
+  local cur="SEL_$1"
+  if [[ "$UPDATE" == "1" && -n "${!cur:-}" ]]; then return 0; fi
+  if ask "$2" "$3"; then eval "SEL_$1=1"; else eval "SEL_$1=0"; fi
+}
+sel() { local v="SEL_$1"; [[ "${!v:-0}" == "1" ]]; }
+skip() { eval "SEL_$1=0"; }
+
+# need <module> <dependency>: turns the dependency on when the module is selected
+need() {
+  if sel "$1" && ! sel "$2"; then
+    eval "SEL_$2=1"
+    echo "  -> '$2' enabled (required by '$1')"
+  fi
+}
+
 ensure_brew() {
-  if ! command -v brew >/dev/null 2>&1; then
-    if ask "Homebrew not found. Install it now?" "N"; then
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
+  command -v brew >/dev/null 2>&1 && return 0
+  if ask "Homebrew not found. Install it now?" "N"; then
+    run bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    if ! dry && [[ -x /opt/homebrew/bin/brew ]]; then
+      grep -qs 'brew shellenv' "$HOME/.zprofile" || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
       eval "$(/opt/homebrew/bin/brew shellenv)"
-    else
-      echo "Homebrew not installed; skipping Homebrew-dependent steps."
     fi
-  fi
-}
-install_pkg_brew() {
-  ensure_brew
-  if command -v brew >/dev/null 2>&1; then
-    brew list --formula "$1" >/dev/null 2>&1 || brew install "$1"
   else
-    echo "brew not found; skipping formula '$1'"
+    echo "  Homebrew not installed; Homebrew-dependent steps are skipped."
   fi
-}
-install_cask_brew() {
-  ensure_brew
-  if command -v brew >/dev/null 2>&1; then
-    brew list --cask "$1" >/dev/null 2>&1 || brew install --cask "$1"
-  else
-    echo "brew not found; skipping cask '$1'"
-  fi
+  command -v brew >/dev/null 2>&1
 }
 
-# ------------------------------ Install mode -------------------------------------
-if ask "Use FULL install mode (auto-accept defaults)?" "Y"; then
-  INSTALL_MODE="FULL"
-  echo "Mode: FULL (auto-accepting defaults)"
-else
-  INSTALL_MODE="CUSTOM"
-  echo "Mode: CUSTOM (interactive prompts)"
-fi
-
-# ------------------------------ Base deps (optional) ---------------------------
-if ask "Install/Update base dependencies (zsh git curl autojump fzf)?" "Y"; then
-  if [[ "$OS_TYPE" == "Linux" ]]; then
-    sudo apt update || true
-    sudo apt install -y zsh git curl autojump fzf || true
-  elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      brew update || true
-      install_pkg_brew zsh || true
-      install_pkg_brew git || true
-      install_pkg_brew autojump || true
-      install_pkg_brew fzf || true
-    else
-      echo "Skipping base deps on macOS; Homebrew is not installed."
-    fi
-  fi
-fi
-
-# ------------------------------ Oh My Zsh (optional) ---------------------------
-if ask "Install/Update Oh My Zsh?" "Y"; then
-  if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
-    echo "Installing Oh My Zsh (unattended)..."
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" --unattended
-  else
-    echo "Oh My Zsh already installed."
-  fi
-fi
-
-# ------------------------------ Antigen (optional) -----------------------------
-if ask "Install/Update Antigen to ~/.antigen.zsh ?" "Y"; then
-  curl -fsSL https://git.io/antigen > "$HOME/.antigen.zsh"
-  echo "Antigen installed/updated."
-fi
-
-# ------------------------------ fzf (optional) ---------------------------------
-if ask "Install/Update fzf and key-bindings?" "Y"; then
-  if [[ ! -d "$HOME/.fzf" ]]; then
-    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
-    "$HOME/.fzf/install" --all
-  else
-    (cd "$HOME/.fzf" && git pull && ./install --all)
-  fi
-fi
-
-# ------------------------------ Oh My Posh (optional) --------------------------
-if ask "Install/Update oh-my-posh and Meslo Nerd Font?" "Y"; then
+pkg() { # pkg <brew-name> [apt-name]
+  local brew_name="$1" apt_name="${2:-$1}"
   if [[ "$OS_TYPE" == "Darwin" ]]; then
-    install_pkg_brew oh-my-posh
-    install_cask_brew font-meslo-lg-nerd-font || true
+    if ensure_brew; then
+      if brew list --formula "$brew_name" >/dev/null 2>&1; then echo "  ok: $brew_name"; else run brew install "$brew_name"; fi
+    fi
   else
-    if ! command -v oh-my-posh >/dev/null 2>&1; then
-      curl -s https://ohmyposh.dev/install.sh | bash -s
-      export PATH="$HOME/.local/bin:$PATH"
+    if dpkg -s "$apt_name" >/dev/null 2>&1; then echo "  ok: $apt_name"; else run sudo apt install -y "$apt_name"; fi
+  fi
+}
+
+cask() { # cask <name> [app-path]
+  if ensure_brew; then
+    if brew list --cask "$1" >/dev/null 2>&1 || { [[ -n "${2:-}" ]] && [[ -d "$2" ]]; }; then
+      echo "  ok: $1"
+    else
+      run brew install --cask "$1"
     fi
   fi
+}
+
+# ------------------------------ Module selection -------------------------------
+echo "Setting up Zsh environment... (repo: $REPO_DIR)"
+if [[ "$UPDATE" == "1" && -f "$SELECTION_FILE" ]]; then
+  eval "$(grep -E '^SEL_[a-z0-9_]+=[01]$' "$SELECTION_FILE" || true)"
+  echo "Reusing saved modules from $SELECTION_FILE"
+  INSTALL_MODE="${INSTALL_MODE:-CUSTOM}"
+fi
+if [[ -z "$INSTALL_MODE" ]]; then
+  if ask "Use FULL install mode (auto-accept defaults)?" "Y"; then INSTALL_MODE="FULL"; else INSTALL_MODE="CUSTOM"; fi
+fi
+echo "Mode: $INSTALL_MODE$([[ "$UPDATE" == "1" ]] && echo ' + update')$(dry && echo ' (dry-run)')"
+
+echo; echo "== Tools =="
+pick base    "Base dependencies (zsh git curl)?" "Y"
+pick fzf     "fzf (fuzzy finder, Ctrl-R, key-bindings)?" "Y"
+pick zoxide  "zoxide (smarter cd: z / zi)?" "Y"
+pick eza     "eza (fzf-tab directory preview)?" "Y"
+pick omp     "oh-my-posh prompt (theme: $OMP_THEME_NAME)?" "Y"
+pick font    "Meslo Nerd Font (glyphs for the prompt)?" "Y"
+
+echo; echo "== Zsh framework =="
+pick omz     "Oh My Zsh?" "Y"
+pick antigen "Antigen plugin manager (required for the plugins below)?" "Y"
+
+if sel antigen; then
+  echo; echo "== Plugins =="
+  pick p_git      "git (aliases/completions)?" "Y"
+  pick p_autosug  "zsh-autosuggestions (ghost text)?" "Y"
+  pick p_histsub  "zsh-history-substring-search (up/down)?" "Y"
+  pick p_aliastip "alias-tips (shows the alias you could have used)?" "Y"
+  pick p_fzf      "junegunn/fzf plugin?" "Y"
+  pick p_ssh      "ssh-agent (loads id_ed25519)?" "Y"
+  pick p_fzftab   "fzf-tab (fzf-powered TAB completion)?" "Y"
+  pick p_synhl    "zsh-syntax-highlighting?" "Y"
+else
+  for m in p_git p_autosug p_histsub p_aliastip p_fzf p_ssh p_fzftab p_synhl; do skip "$m"; done
 fi
 
-# ------------------------------ FULL .zshrc (verbatim w/ $HOME) ----------------
-# EXACT order, OMP at the very end, Conda paths generic with $HOME.
-read -r -d '' FULL_ZSHRC <<'EOF'
+echo; echo "== Shell config =="
+conda_default="N"; [[ -d "$HOME/anaconda3" ]] && conda_default="Y"
+pick conda   "Conda init block (\$HOME/anaconda3)?" "$conda_default"
+pick vscode  "VS Code guard (skip prompt/plugins while VS Code resolves its env)?" "Y"
+pick usercfg "Personal aliases, history timestamps, key bindings?" "Y"
+
+if [[ "$OS_TYPE" == "Darwin" && "$ZSHRC_ONLY" == "0" ]]; then
+  echo; echo "== Terminal apps =="
+  pick iterm2      "Install iTerm2 and set up the Custom profile?" "Y"
+  pick terminalapp "Import the Terminal.app Custom profile?" "Y"
+else
+  skip iterm2; skip terminalapp
+fi
+
+# Dependencies
+need p_fzf fzf
+need p_fzftab fzf
+need iterm2 font
+need terminalapp font
+
+# ------------------------------ zshrc generation -------------------------------
+emit_zshrc() {
+  cat <<'EOF'
 # If come from bash might have to change $PATH
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
+EOF
+
+  if sel conda; then cat <<'EOF'
+
+
+# >>> conda initialize >>>
+# !! Contents within this block are managed by 'conda init' !!
+__conda_setup="$("$HOME/anaconda3/bin/conda" 'shell.zsh' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+        . "$HOME/anaconda3/etc/profile.d/conda.sh"
+    else
+        export PATH="$HOME/anaconda3/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+# <<< conda initialize <<<
+EOF
+  fi
+
+  if sel vscode; then cat <<'EOF'
+
+
+#### VS Code ####
+# VS Code resolves its env with a tty-less login shell: stop here, nothing below sets env
+[[ -n "${VSCODE_RESOLVING_ENVIRONMENT:-}" ]] && return
+EOF
+  fi
+
+  if sel omz; then cat <<'EOF'
 
 
 #### Oh My Zsh ####
 # Path to Oh My Zsh installation
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME=""
+EOF
+  fi
+
+  if sel p_ssh; then cat <<'EOF'
+
+
+#### SSH Agent ####
+zstyle ':omz:plugins:ssh-agent' identities id_ed25519
+zstyle ':omz:plugins:ssh-agent' quiet yes
+EOF
+  fi
+
+  if sel antigen; then
+    cat <<'EOF'
 
 
 #### Antigen ####
@@ -143,40 +247,37 @@ if [ -f "$HOME/.antigen.zsh" ]; then
   antigen use oh-my-zsh
 
   # Load plugins (fzf-tab after fzf, syntax-highlighting last)
-  antigen bundle git
-  antigen bundle zsh-users/zsh-autosuggestions
-  antigen bundle zsh-users/zsh-history-substring-search
-  antigen bundle djui/alias-tips
-  antigen bundle rupa/z
-  antigen bundle junegunn/fzf
-  antigen bundle ssh-agent
-  antigen bundle Aloxaf/fzf-tab
-  antigen bundle zsh-users/zsh-syntax-highlighting
+EOF
+    if sel p_git;      then echo "  antigen bundle git"; fi
+    if sel p_autosug;  then echo "  antigen bundle zsh-users/zsh-autosuggestions"; fi
+    if sel p_histsub;  then echo "  antigen bundle zsh-users/zsh-history-substring-search"; fi
+    if sel p_aliastip; then echo "  antigen bundle djui/alias-tips"; fi
+    if sel p_fzf;      then echo "  antigen bundle junegunn/fzf"; fi
+    if sel p_ssh;      then echo "  antigen bundle ssh-agent"; fi
+    if sel p_fzftab;   then echo "  antigen bundle Aloxaf/fzf-tab"; fi
+    if sel p_synhl;    then echo "  antigen bundle zsh-users/zsh-syntax-highlighting"; fi
+    cat <<'EOF'
 
   # Apply Antigen settings
   antigen apply
 fi
+EOF
+  fi
 
-
-#### SSH Agent ####
-export SSH_AUTO_SPAWN="yes"
-export SSH_USE_STRICT_MODE="no"
-export SSH_ADD_KEYS="$HOME/.ssh/id_rsa $HOME/.ssh/id_ed25519"
-
-if [ -z "$SSH_AUTH_SOCK" ]; then
-  eval "$(ssh-agent -s)" > /dev/null
-  ssh-add "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" 2>/dev/null
-fi
-
-
-#### User configuration ####
-# Autojump
-if [ -f /usr/share/autojump/autojump.zsh ]; then
-  source /usr/share/autojump/autojump.zsh
-fi
-
+  if sel fzf || sel zoxide || sel usercfg; then
+    printf '\n\n#### User configuration ####\n'
+    if sel fzf; then cat <<'EOF'
 # fzf setup
 [ -f $HOME/.fzf.zsh ] && source $HOME/.fzf.zsh
+EOF
+    fi
+    if sel zoxide; then cat <<'EOF'
+
+# zoxide (z / zi)
+command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+EOF
+    fi
+    if sel usercfg; then cat <<'EOF'
 
 # Set personal aliases
 alias zshconfig="nano ~/.zshrc"
@@ -184,10 +285,19 @@ alias ohmyzsh="nano ~/.oh-my-zsh"
 
 # Enable history timestamps
 HIST_STAMPS="yyyy-mm-dd"
+EOF
+      if sel p_histsub; then cat <<'EOF'
 
 # History substring search bindings (↑/↓)
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
+EOF
+      fi
+    fi
+  fi
+
+  if sel p_fzftab; then
+    cat <<'EOF'
 
 
 #### fzf-tab UI settings ####
@@ -195,256 +305,158 @@ zstyle ':completion:*:git-checkout:*' sort false
 zstyle ':completion:*:descriptions' format '[%d]'
 zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
 zstyle ':completion:*' menu no
-zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always $realpath'
-zstyle ':fzf-tab:*' fzf-flags --color=fg:1,fg+:2 --bind=tab:accept
-zstyle ':fzf-tab:*' use-fzf-default-opts yes
-zstyle ':fzf-tab:*' switch-group '<' '>'
-
-
-# >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('$HOME/anaconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
-if [ $? -eq 0 ]; then
-    eval "$__conda_setup"
-else
-    if [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-        . "$HOME/anaconda3/etc/profile.d/conda.sh"
-    else
-        export PATH="$HOME/anaconda3/bin:$PATH"
-    fi
-fi
-unset __conda_setup
-# <<< conda initialize <<<
-
-
-#### Oh My Posh theme ####
-if [[ $- == *i* ]]; then
-  if command -v oh-my-posh >/dev/null 2>&1; then
-    eval "$(oh-my-posh init zsh --config https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json)" || \
-      PROMPT='%F{cyan}%n@%m%f:%F{yellow}%~%f %# '
-  else
-    PROMPT='%F{cyan}%n@%m%f:%F{yellow}%~%f %# '
-  fi
-fi
 EOF
-
-# ------------------------------ Modular blocks ---------------------------------
-BLOCK_PATH=$'# If come from bash might have to change $PATH\n# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH\n'
-BLOCK_OMZ=$'#### Oh My Zsh ####\n# Path to Oh My Zsh installation\nexport ZSH="$HOME/.oh-my-zsh"\nZSH_THEME=""\n'
-BLOCK_ANTIGEN_HEADER=$'#### Antigen ####\n# Load Antigen\nif [ -f "$HOME/.antigen.zsh" ]; then\n  source "$HOME/.antigen.zsh"\n\n  # Use Oh My Zsh plugins\n  antigen use oh-my-zsh\n\n  # Load plugins (fzf-tab after fzf, syntax-highlighting last)\n'
-PLUG_git=$'  antigen bundle git\n'
-PLUG_autosugg=$'  antigen bundle zsh-users/zsh-autosuggestions\n'
-PLUG_hist_sub=$'  antigen bundle zsh-users/zsh-history-substring-search\n'
-PLUG_alias_tips=$'  antigen bundle djui/alias-tips\n'
-PLUG_rupa_z=$'  antigen bundle rupa/z\n'
-PLUG_fzf=$'  antigen bundle junegunn/fzf\n'
-PLUG_ssh=$'  antigen bundle ssh-agent\n'
-PLUG_fzf_tab=$'  antigen bundle Aloxaf/fzf-tab\n'
-PLUG_syntax=$'  antigen bundle zsh-users/zsh-syntax-highlighting\n'
-BLOCK_ANTIGEN_FOOTER=$'\n  # Apply Antigen settings\n  antigen apply\nfi\n'
-
-read -r -d '' BLOCK_SSH_AGENT <<'EOF'
-
-#### SSH Agent ####
-export SSH_AUTO_SPAWN="yes"
-export SSH_USE_STRICT_MODE="no"
-export SSH_ADD_KEYS="$HOME/.ssh/id_rsa $HOME/.ssh/id_ed25519"
-
-if [ -z "$SSH_AUTH_SOCK" ]; then
-  eval "$(ssh-agent -s)" > /dev/null
-  ssh-add "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" 2>/dev/null
-fi
-EOF
-
-read -r -d '' BLOCK_USER_CFG <<'EOF'
-
-#### User configuration ####
-# Autojump
-if [ -f /usr/share/autojump/autojump.zsh ]; then
-  source /usr/share/autojump/autojump.zsh
-fi
-
-# fzf setup
-[ -f $HOME/.fzf.zsh ] && source $HOME/.fzf.zsh
-
-# Set personal aliases
-alias zshconfig="nano ~/.zshrc"
-alias ohmyzsh="nano ~/.oh-my-zsh"
-
-# Enable history timestamps
-HIST_STAMPS="yyyy-mm-dd"
-
-# History substring search bindings (↑/↓)
-bindkey '^[[A' history-substring-search-up
-bindkey '^[[B' history-substring-search-down
-EOF
-
-read -r -d '' BLOCK_FZFTAB_UI <<'EOF'
-
-#### fzf-tab UI settings ####
-zstyle ':completion:*:git-checkout:*' sort false
-zstyle ':completion:*:descriptions' format '[%d]'
-zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
-zstyle ':completion:*' menu no
-zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always $realpath'
+    if sel eza; then echo "zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always \$realpath'"; fi
+    cat <<'EOF'
 zstyle ':fzf-tab:*' fzf-flags --color=fg:1,fg+:2 --bind=tab:accept
 zstyle ':fzf-tab:*' use-fzf-default-opts yes
 zstyle ':fzf-tab:*' switch-group '<' '>'
 EOF
+  fi
 
-read -r -d '' BLOCK_CONDA <<'EOF'
+  # Oh My Posh must stay last
+  if sel omp; then
+    printf '\n\n#### Oh My Posh theme ####\n'
+    printf 'if [[ $- == *i* ]]; then\n'
+    printf '  if command -v oh-my-posh >/dev/null 2>&1; then\n'
+    printf '    __omp_cfg="$HOME/.config/oh-my-posh/%s"\n' "$OMP_THEME_NAME"
+    printf '    [[ -f "$__omp_cfg" ]] || __omp_cfg="%s"\n' "$OMP_THEME_URL"
+    printf '    eval "$(oh-my-posh init zsh --config "$__omp_cfg")" || \\\n'
+    printf "      PROMPT='%%F{cyan}%%n@%%m%%f:%%F{yellow}%%~%%f %%# '\n"
+    printf '    unset __omp_cfg\n'
+    printf '  else\n'
+    printf "    PROMPT='%%F{cyan}%%n@%%m%%f:%%F{yellow}%%~%%f %%# '\n"
+    printf '  fi\n'
+    printf 'fi\n'
+  fi
+}
 
-# >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('$HOME/anaconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
-if [ $? -eq 0 ]; then
-    eval "$__conda_setup"
-else
-    if [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-        . "$HOME/anaconda3/etc/profile.d/conda.sh"
-    else
-        export PATH="$HOME/anaconda3/bin:$PATH"
-    fi
-fi
-unset __conda_setup
-# <<< conda initialize <<<
-EOF
-
-read -r -d '' BLOCK_OMP_DEFAULT <<'EOF'
-
-#### Oh My Posh theme ####
-if [[ $- == *i* ]]; then
-  if command -v oh-my-posh >/dev/null 2>&1; then
-    eval "$(oh-my-posh init zsh --config __OMP_URL__)" || \
-      PROMPT='%F{cyan}%n@%m%f:%F{yellow}%~%f %# '
+write_zshrc() {
+  local target="$HOME/.zshrc" tmp
+  tmp="$(mktemp)"
+  emit_zshrc > "$tmp"
+  if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
+    echo "~/.zshrc already up to date."
+  elif dry; then
+    echo "[dry-run] ~/.zshrc would change:"
+    diff -u "$target" "$tmp" || true
   else
-    PROMPT='%F{cyan}%n@%m%f:%F{yellow}%~%f %# '
-  fi
-fi
-EOF
-
-# ------------------------------ Mode selection ---------------------------------
-if ask "Write FULL .zshrc (verbatim with \$HOME paths)?" "Y"; then
-  write_file "$HOME/.zshrc" "$FULL_ZSHRC"
-else
-  echo "Personalized mode — choose each section/plugin."
-  out=""
-  enable_hist_sub=0
-  enable_fzf_tab=0
-
-  ask "Include PATH comment block?" "Y" && out+="$BLOCK_PATH"$'\n'
-  ask "Include Oh My Zsh block (ZSH path + empty theme)?" "Y" && out+="$BLOCK_OMZ"$'\n'
-
-  if ask "Include Antigen block (plugin manager)?" "Y"; then
-    out+="$BLOCK_ANTIGEN_HEADER"
-    ask "Plugin: git (git aliases/completions)?" "Y" && out+="$PLUG_git"
-    ask "Plugin: zsh-autosuggestions (ghost text suggestions)?" "Y" && out+="$PLUG_autosugg"
-    if ask "Plugin: zsh-history-substring-search (↑/↓ search)?" "Y"; then
-      out+="$PLUG_hist_sub"; enable_hist_sub=1
+    if [[ "$UPDATE" == "1" && -f "$target" ]]; then diff -u "$target" "$tmp" || true; fi
+    if [[ -f "$target" ]]; then
+      cp -p "$target" "$target.bak.$(timestamp)"
+      echo "Backed up ~/.zshrc -> ~/.zshrc.bak.*"
     fi
-    ask "Plugin: djui/alias-tips (show expanded alias)?" "Y" && out+="$PLUG_alias_tips"
-    ask "Plugin: rupa/z (legacy dir-jump; optional if using autojump)?" "N" && out+="$PLUG_rupa_z"
-    if ask "Plugin: fzf (fuzzy finder integration)?" "Y"; then
-      out+="$PLUG_fzf"
-    fi
-    ask "Plugin: ssh-agent (auto-load keys)?" "Y" && out+="$PLUG_ssh"
-    if ask "Plugin: fzf-tab (TAB completion via fzf)?" "Y"; then
-      out+="$PLUG_fzf_tab"; enable_fzf_tab=1
-    fi
-    ask "Plugin: zsh-syntax-highlighting (colorize CLI)?" "Y" && out+="$PLUG_syntax"
-    out+="$BLOCK_ANTIGEN_FOOTER"
+    cp "$tmp" "$target"
+    echo "Wrote ~/.zshrc"
+  fi
+  rm -f "$tmp"
+}
+
+# ------------------------------ Installs ---------------------------------------
+if [[ "$ZSHRC_ONLY" == "0" ]]; then
+  echo; echo "== Installing =="
+
+  if sel base; then
+    if [[ "$OS_TYPE" == "Linux" ]]; then run sudo apt update; fi
+    for t in zsh git curl; do
+      if command -v "$t" >/dev/null 2>&1; then echo "  ok: $t"; else pkg "$t"; fi
+    done
   fi
 
-  ask "Include SSH Agent block?" "Y" && out+="$BLOCK_SSH_AGENT"
-  ask "Include User configuration block (autojump, fzf, aliases, timestamps, bindkeys)?" "Y" && out+="$BLOCK_USER_CFG"
-  (( enable_fzf_tab )) && ask "Include fzf-tab UI settings?" "Y" && out+="$BLOCK_FZFTAB_UI"
-  ask "Include Conda initialize block (from \$HOME/anaconda3)?" "Y" && out+="$BLOCK_CONDA"
-
-  # Oh My Posh MUST be last
-  if ask "Include Oh My Posh theme block (init last)?" "Y"; then
-    default_url="https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json"
-    read -r -p "Enter oh-my-posh theme URL (blank=default): " omp_url
-    omp_url="${omp_url:-$default_url}"
-    omp_block="${BLOCK_OMP_DEFAULT//__OMP_URL__/$omp_url}"
-    out+="$omp_block"
-  fi
-
-  write_file "$HOME/.zshrc" "$out"
-fi
-
-# ------------------------------ Extras -----------------------------------------
-if ask "Install eza for fzf-tab preview (optional)?" "N"; then
-  if [[ "$OS_TYPE" == "Linux" ]]; then
-    sudo apt install -y eza || true
-  elif [[ "$OS_TYPE" == "Darwin" ]]; then
-    install_pkg_brew eza || true
-  fi
-fi
-
-if command -v oh-my-posh >/dev/null 2>&1; then
-  oh-my-posh enable reload >/dev/null 2>&1 || true
-fi
-
-# ------------------------------ Terminal/iTerm2 setup --------------------------
-iterm_prompt_default="Y"
-[[ "${INSTALL_MODE:-}" == "FULL" ]] && iterm_prompt_default="N"
-if [[ "$OS_TYPE" == "Darwin" ]] && ask "Configure iTerm2 & Terminal.app profiles now?" "$iterm_prompt_default"; then
-  echo "Configuring terminal profiles..."
-
-  # iTerm2 Dynamic Profile
-  read -r -p "Path to iTerm2 Dynamic Profile JSON (e.g. terminal_config/Custom.json): " ITERM_SRC_JSON
-  ITERM_SRC_JSON="${ITERM_SRC_JSON:-terminal_config/Custom.json}"
-  ITERM_DEST_DIR="$HOME/Library/Application Support/iTerm2/DynamicProfiles"
-  if [[ -f "$ITERM_SRC_JSON" ]]; then
-    mkdir -p "$ITERM_DEST_DIR"
-    cp -f "$ITERM_SRC_JSON" "$ITERM_DEST_DIR/Custom.json"
-    ITERM_GUID="$('/usr/bin/python3' - <<'PY'
-import json,sys
-p=json.load(open(sys.argv[1]))
-print(p.get("Guid",""))
-PY
-"$ITERM_SRC_JSON")"
-    if [[ -n "${ITERM_GUID}" ]]; then
-      defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$ITERM_GUID"
-      echo "iTerm2: Dynamic profile installed and set default (Guid=$ITERM_GUID)."
+  if sel omz; then
+    if [[ -d "$HOME/.oh-my-zsh" ]]; then
+      echo "  ok: Oh My Zsh"
     else
-      echo "iTerm2: Profile copied; no Guid found to set default."
+      run bash -c 'curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | sh -s -- --unattended'
+    fi
+  fi
+
+  if sel antigen; then
+    if dry; then echo "  [dry-run] curl -fsSL https://git.io/antigen > ~/.antigen.zsh"; else curl -fsSL https://git.io/antigen > "$HOME/.antigen.zsh"; fi
+  fi
+
+  if sel fzf; then
+    if [[ -d "$HOME/.fzf" ]]; then
+      run git -C "$HOME/.fzf" pull --ff-only
+    else
+      run git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
+    fi
+    run "$HOME/.fzf/install" --key-bindings --completion --no-update-rc
+  fi
+
+  if sel zoxide; then
+    pkg zoxide
+    if command -v zoxide >/dev/null 2>&1 && [[ -f "$HOME/.z" && ! -f "$HOME/Library/Application Support/zoxide/db.zo" && ! -f "$HOME/.local/share/zoxide/db.zo" ]]; then
+      run zoxide import z
+    fi
+  fi
+
+  if sel eza; then pkg eza; fi
+
+  if sel omp; then
+    if [[ "$OS_TYPE" == "Darwin" ]]; then
+      pkg oh-my-posh
+    elif ! command -v oh-my-posh >/dev/null 2>&1; then
+      run bash -c 'curl -s https://ohmyposh.dev/install.sh | bash -s'
+    fi
+    run mkdir -p "$HOME/.config/oh-my-posh"
+    run curl -fsSL "$OMP_THEME_URL" -o "$HOME/.config/oh-my-posh/$OMP_THEME_NAME"
+  fi
+
+  if sel font && [[ "$OS_TYPE" == "Darwin" ]]; then cask font-meslo-lg-nerd-font; fi
+fi
+
+echo; echo "== Zsh config =="
+write_zshrc
+
+# ------------------------------ Terminal apps ----------------------------------
+if sel iterm2; then
+  echo; echo "== iTerm2 =="
+  cask iterm2 /Applications/iTerm.app
+  if [[ -f "$ITERM_JSON" ]]; then
+    dest_dir="$HOME/Library/Application Support/iTerm2/DynamicProfiles"
+    guid="$(plutil -extract Guid raw -o - "$ITERM_JSON")"
+    home_escaped="${HOME//\//\\/}"
+    if dry; then
+      echo "  [dry-run] wrap $ITERM_JSON as a Dynamic Profile -> $dest_dir/Custom.json (Guid=$guid)"
+      echo "  [dry-run] defaults write com.googlecode.iterm2 \"Default Bookmark Guid\" -string $guid"
+    else
+      mkdir -p "$dest_dir"
+      { printf '{"Profiles":['; sed "s#\"Working Directory\" : \"[^\"]*\"#\"Working Directory\" : \"$home_escaped\"#" "$ITERM_JSON"; printf ']}\n'; } > "$dest_dir/Custom.json"
+      defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$guid"
+      echo "  Dynamic profile installed and set as default (Guid=$guid). Restart iTerm2."
     fi
   else
-    echo "iTerm2: Skipped (file not found: $ITERM_SRC_JSON)."
+    echo "  Skipped: $ITERM_JSON not found."
   fi
+fi
 
-  # Apple Terminal profile
-  read -r -p "Path to Terminal.app profile (.terminal) (e.g. terminal_config/Custom.terminal): " TERM_SRC_FILE
-  TERM_SRC_FILE="${TERM_SRC_FILE:-terminal_config/Custom.terminal}"
-  if [[ -f "$TERM_SRC_FILE" ]]; then
-    /usr/bin/open -g "$TERM_SRC_FILE" || true
-    TERM_PROFILE_NAME="$('/usr/bin/plutil' -convert json -o - "$TERM_SRC_FILE" 2>/dev/null | /usr/bin/python3 - <<'PY'
-import json,sys
-data=json.load(sys.stdin)
-ws=data.get("Window Settings",{})
-print(next(iter(ws.keys()),""))
-PY
-)"
-    if [[ -n "$TERM_PROFILE_NAME" ]]; then
-      defaults write com.apple.Terminal "Default Window Settings" -string "$TERM_PROFILE_NAME"
-      defaults write com.apple.Terminal "Startup Window Settings" -string "$TERM_PROFILE_NAME"
-      echo "Terminal.app: Profile '$TERM_PROFILE_NAME' imported and set as default."
+if sel terminalapp; then
+  echo; echo "== Terminal.app =="
+  if [[ -f "$TERMINAL_FILE" ]]; then
+    profile_name="$(plutil -extract name raw -o - "$TERMINAL_FILE" 2>/dev/null || true)"
+    run /usr/bin/open -g "$TERMINAL_FILE"
+    if [[ -n "$profile_name" ]]; then
+      run defaults write com.apple.Terminal "Default Window Settings" -string "$profile_name"
+      run defaults write com.apple.Terminal "Startup Window Settings" -string "$profile_name"
+      echo "  Profile '$profile_name' imported and set as default. Reopen Terminal.app."
     else
-      echo "Terminal.app: Could not detect profile name; profile opened/imported."
+      echo "  Profile opened/imported; name not detected."
     fi
   else
-    echo "Terminal.app: Skipped (file not found: $TERM_SRC_FILE)."
+    echo "  Skipped: $TERMINAL_FILE not found."
   fi
+fi
 
-  # Nudge apps to reload next launch (safe if not running)
-  killall iTerm2  >/dev/null 2>&1 || true
-  killall Terminal >/dev/null 2>&1 || true
-  echo "Profiles configured. Reopen iTerm2/Terminal to apply."
+# ------------------------------ Save selection ---------------------------------
+if [[ "$ZSHRC_ONLY" == "0" ]] && ! dry; then
+  mkdir -p "$(dirname "$SELECTION_FILE")"
+  (set | grep -E '^SEL_[a-z0-9_]+=[01]$' || true) > "$SELECTION_FILE"
+  echo "Saved module selection -> $SELECTION_FILE"
 fi
 
 # ------------------------------ Done -------------------------------------------
-echo "Reloading Zsh configuration..."
-# shellcheck disable=SC1090
-source "$HOME/.zshrc" || echo "Configuration will be applied when you restart your terminal."
-echo "✅ Zsh setup complete! Restart your terminal or run 'exec zsh' to apply."
+if [[ "$ZSHRC_ONLY" == "0" ]] && sel omp && command -v oh-my-posh >/dev/null 2>&1; then
+  run oh-my-posh enable reload
+fi
+echo; echo "Done. Restart your terminal or run 'exec zsh' to apply."

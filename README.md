@@ -41,14 +41,20 @@ On a machine configured before the selection file existed, the first `--update` 
 
 | Group | Modules |
 | --- | --- |
-| Tools | base (zsh git curl), fzf, zoxide, eza, oh-my-posh, Meslo Nerd Font |
-| Framework | Oh My Zsh, Antigen |
-| Plugins | git, zsh-autosuggestions, zsh-history-substring-search, alias-tips, fzf, ssh-agent, fzf-tab, zsh-syntax-highlighting |
-| Shell config | conda init, VS Code guard, aliases / history timestamps / key bindings |
+| Tools | base (zsh git curl), fzf, zoxide, eza, oh-my-posh, Meslo Nerd Font, bat, fd, atuin, git-delta, lazygit, mise, direnv |
+| Plugin manager | antidote (+ zsh-defer) |
+| Plugins | git, zsh-autosuggestions, zsh-history-substring-search, alias-tips, ssh-agent, fzf-tab, fast-syntax-highlighting |
+| Shell config | conda init, VS Code guard, aliases / history timestamps / key bindings, `zhelp` |
 | Terminal apps (macOS) | iTerm2 (cask + Dynamic Profile from `terminal_config/Custom.json`), Terminal.app profile (`terminal_config/Custom.terminal`) |
 
-Dependencies are enabled automatically (fzf-tab needs fzf, the terminal profiles need the Nerd Font).
+Dependencies are enabled automatically (fzf-tab needs fzf, the terminal profiles need the Nerd Font). Only the macOS path has been tested; on Linux most of the newer tools are not in `apt` and are skipped with a message (the `.zshrc` guards every init with `command -v`).
 
+- **zhelp** prints a glossary of the aliases, keys and tools of the modules installed on this machine (`share/glossary.tsv`, filtered at install time into `~/.config/zsh-setup/glossary.tsv`). `zhelp` opens an fzf list; `zhelp <term>` also greps the live aliases and functions (`zhelp git` lists the ~200 git aliases).
+- **antidote** replaces Antigen. Plugins come from `~/.zsh_plugins.txt`, generated from the selected modules, and load from a static file; autosuggestions and syntax highlighting are deferred with zsh-defer. On `--update`, a machine that used Antigen is migrated (`~/.antigen*` is left on disk, no longer loaded).
+- **atuin** owns Ctrl-R (Up/Down stay with history-substring-search); your zsh history is imported once. No account or sync is set up.
+- **git-delta** is enabled through a git include file (`~/.config/zsh-setup/delta.gitconfig` added to `include.path`), your own git config is not rewritten.
+- **fd / bat** feed fzf: Ctrl-T lists files with fd and previews them with bat.
+- **mise / direnv** manage per-project tool versions / environment variables (`.mise.toml`, `.envrc`).
 - **zoxide** replaces `z` / autojump: same `z` command, plus `zi` for interactive selection. Existing `~/.z` history is imported on first install.
 - **VS Code guard**: VS Code resolves its environment with a tty-less login shell. The generated `.zshrc` returns early in that case (`VSCODE_RESOLVING_ENVIRONMENT`), which avoids the "unable to resolve shell environment" timeouts.
 - **Terminal profiles**: `Custom.json` is the iTerm2 profile export; the installer wraps it as a Dynamic Profile and sets it as default. `Custom.terminal` is the Terminal.app profile.

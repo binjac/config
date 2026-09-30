@@ -111,12 +111,14 @@ pkg() { # pkg <brew-name> [apt-name]
   fi
 }
 
-cask() { # cask <name> [app-path]
+cask() { # cask <name> [app-path ...]
+  local name="$1" app found=0; shift
+  for app in "$@"; do [[ -d "$app" ]] && found=1; done
   if ensure_brew; then
-    if brew list --cask "$1" >/dev/null 2>&1 || { [[ -n "${2:-}" ]] && [[ -d "$2" ]]; }; then
-      echo "  ok: $1"
+    if [[ "$found" == "1" ]] || brew list --cask "$name" >/dev/null 2>&1; then
+      echo "  ok: $name"
     else
-      run brew install --cask "$1"
+      run brew install --cask "$name"
     fi
   fi
 }
@@ -412,12 +414,15 @@ write_zshrc
 # ------------------------------ Terminal apps ----------------------------------
 if sel iterm2; then
   echo; echo "== iTerm2 =="
-  cask iterm2 /Applications/iTerm.app
+  cask iterm2 /Applications/iTerm.app "$HOME/Applications/iTerm.app"
   if [[ -f "$ITERM_JSON" ]]; then
     dest_dir="$HOME/Library/Application Support/iTerm2/DynamicProfiles"
     guid="$(plutil -extract Guid raw -o - "$ITERM_JSON")"
     home_escaped="${HOME//\//\\/}"
-    if dry; then
+    if defaults read com.googlecode.iterm2 "New Bookmarks" 2>/dev/null | grep -q "Guid = \"$guid\""; then
+      echo "  Profile $guid already in iTerm2 preferences; Dynamic Profile skipped."
+      dry || defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$guid"
+    elif dry; then
       echo "  [dry-run] wrap $ITERM_JSON as a Dynamic Profile -> $dest_dir/Custom.json (Guid=$guid)"
       echo "  [dry-run] defaults write com.googlecode.iterm2 \"Default Bookmark Guid\" -string $guid"
     else

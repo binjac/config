@@ -242,7 +242,6 @@ EOF
 
 #### SSH Agent ####
 zstyle ':omz:plugins:ssh-agent' identities id_ed25519
-zstyle ':omz:plugins:ssh-agent' quiet yes
 EOF
   fi
 

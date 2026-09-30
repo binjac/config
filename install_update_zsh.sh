@@ -8,7 +8,9 @@ INSTALL_MODE="${INSTALL_MODE:-}"
 DRY_RUN="${DRY_RUN:-0}"
 ZSHRC_ONLY=0
 UPDATE=0
-SELECTION_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zsh-setup/selection.env"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zsh-setup"
+SELECTION_FILE="$CONFIG_DIR/selection.env"
+GLOSSARY_DEST="$CONFIG_DIR/glossary.tsv"
 ARGS=("$@")
 OMP_THEME_URL="${OMP_THEME_URL:-https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json}"
 OMP_THEME_NAME="$(basename "$OMP_THEME_URL")"
@@ -142,23 +144,33 @@ pick zoxide  "zoxide (smarter cd: z / zi)?" "Y"
 pick eza     "eza (fzf-tab directory preview)?" "Y"
 pick omp     "oh-my-posh prompt (theme: $OMP_THEME_NAME)?" "Y"
 pick font    "Meslo Nerd Font (glyphs for the prompt)?" "Y"
+pick bat     "bat (cat with syntax highlighting, fzf preview)?" "Y"
+pick fd      "fd (fast find, feeds fzf)?" "Y"
+pick atuin   "atuin (searchable shell history, owns Ctrl-R)?" "Y"
+pick delta   "git-delta (readable git diffs, via a git include file)?" "Y"
+pick lazygit "lazygit (git terminal UI, alias lg)?" "Y"
+pick mise    "mise (per-project tool versions: Java, Terraform, ...)?" "Y"
+pick direnv  "direnv (per-directory env vars via .envrc)?" "Y"
 
-echo; echo "== Zsh framework =="
-pick omz     "Oh My Zsh?" "Y"
-pick antigen "Antigen plugin manager (required for the plugins below)?" "Y"
+if [[ "${SEL_antigen:-0}" == "1" && -z "${SEL_antidote:-}" ]]; then
+  echo; echo "Migration: Antigen is replaced by antidote (plugins load statically, autosuggestions and highlighting are deferred)."
+  echo "  ~/.antigen and ~/.antigen.zsh are left on disk; the new ~/.zshrc no longer loads them."
+fi
 
-if sel antigen; then
+echo; echo "== Plugin manager =="
+pick antidote "antidote plugin manager + zsh-defer (required for the plugins below)?" "Y"
+
+if sel antidote; then
   echo; echo "== Plugins =="
   pick p_git      "git (aliases/completions)?" "Y"
-  pick p_autosug  "zsh-autosuggestions (ghost text)?" "Y"
+  pick p_autosug  "zsh-autosuggestions (ghost text, deferred)?" "Y"
   pick p_histsub  "zsh-history-substring-search (up/down)?" "Y"
   pick p_aliastip "alias-tips (shows the alias you could have used)?" "Y"
-  pick p_fzf      "junegunn/fzf plugin?" "Y"
   pick p_ssh      "ssh-agent (loads id_ed25519)?" "Y"
   pick p_fzftab   "fzf-tab (fzf-powered TAB completion)?" "Y"
-  pick p_synhl    "zsh-syntax-highlighting?" "Y"
+  pick p_fsh      "fast-syntax-highlighting (deferred)?" "Y"
 else
-  for m in p_git p_autosug p_histsub p_aliastip p_fzf p_ssh p_fzftab p_synhl; do skip "$m"; done
+  for m in p_git p_autosug p_histsub p_aliastip p_ssh p_fzftab p_fsh; do skip "$m"; done
 fi
 
 echo; echo "== Shell config =="
@@ -166,6 +178,7 @@ conda_default="N"; [[ -d "$HOME/anaconda3" ]] && conda_default="Y"
 pick conda   "Conda init block (\$HOME/anaconda3)?" "$conda_default"
 pick vscode  "VS Code guard (skip prompt/plugins while VS Code resolves its env)?" "Y"
 pick usercfg "Personal aliases, history timestamps, key bindings?" "Y"
+pick zhelp   "zhelp command (glossary of aliases, keys and tools)?" "Y"
 
 if [[ "$OS_TYPE" == "Darwin" && "$ZSHRC_ONLY" == "0" ]]; then
   echo; echo "== Terminal apps =="
@@ -176,7 +189,6 @@ else
 fi
 
 # Dependencies
-need p_fzf fzf
 need p_fzftab fzf
 need iterm2 font
 need terminalapp font
@@ -208,22 +220,20 @@ unset __conda_setup
 EOF
   fi
 
+  if sel mise; then cat <<'EOF'
+
+
+#### mise ####
+command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
+EOF
+  fi
+
   if sel vscode; then cat <<'EOF'
 
 
 #### VS Code ####
 # VS Code resolves its env with a tty-less login shell: stop here, nothing below sets env
 [[ -n "${VSCODE_RESOLVING_ENVIRONMENT:-}" ]] && return
-EOF
-  fi
-
-  if sel omz; then cat <<'EOF'
-
-
-#### Oh My Zsh ####
-# Path to Oh My Zsh installation
-export ZSH="$HOME/.oh-my-zsh"
-ZSH_THEME=""
 EOF
   fi
 
@@ -236,65 +246,78 @@ zstyle ':omz:plugins:ssh-agent' quiet yes
 EOF
   fi
 
-  if sel antigen; then
-    cat <<'EOF'
+  if sel antidote; then cat <<'EOF'
 
 
-#### Antigen ####
-# Load Antigen
-if [ -f "$HOME/.antigen.zsh" ]; then
-  source "$HOME/.antigen.zsh"
-
-  # Use Oh My Zsh plugins
-  antigen use oh-my-zsh
-
-  # Load plugins (fzf-tab after fzf, syntax-highlighting last)
-EOF
-    if sel p_git;      then echo "  antigen bundle git"; fi
-    if sel p_autosug;  then echo "  antigen bundle zsh-users/zsh-autosuggestions"; fi
-    if sel p_histsub;  then echo "  antigen bundle zsh-users/zsh-history-substring-search"; fi
-    if sel p_aliastip; then echo "  antigen bundle djui/alias-tips"; fi
-    if sel p_fzf;      then echo "  antigen bundle junegunn/fzf"; fi
-    if sel p_ssh;      then echo "  antigen bundle ssh-agent"; fi
-    if sel p_fzftab;   then echo "  antigen bundle Aloxaf/fzf-tab"; fi
-    if sel p_synhl;    then echo "  antigen bundle zsh-users/zsh-syntax-highlighting"; fi
-    cat <<'EOF'
-
-  # Apply Antigen settings
-  antigen apply
-fi
+#### antidote (plugins listed in ~/.zsh_plugins.txt) ####
+for __antidote in "${HOMEBREW_PREFIX:-/opt/homebrew}/opt/antidote/share/antidote/antidote.zsh" "$HOME/.antidote/antidote.zsh"; do
+  [[ -r "$__antidote" ]] && { source "$__antidote"; break; }
+done
+unset __antidote
+(( $+functions[antidote] )) && antidote load
 EOF
   fi
 
-  if sel fzf || sel zoxide || sel usercfg; then
-    printf '\n\n#### User configuration ####\n'
-    if sel fzf; then cat <<'EOF'
+  printf '\n\n#### User configuration ####\n'
+  if [[ "$OS_TYPE" == "Linux" ]]; then
+    if sel bat; then echo 'command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1 && alias bat=batcat'; fi
+    if sel fd;  then echo 'command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1 && alias fd=fdfind'; fi
+  fi
+  if sel fzf && sel fd; then cat <<'EOF'
+# fzf x fd: list files/dirs with fd (hidden files included, .git excluded)
+if command -v fd >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fd --type f --hidden --exclude .git'
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+  export FZF_ALT_C_COMMAND='fd --type d --hidden --exclude .git'
+fi
+EOF
+  fi
+  if sel fzf && sel bat; then cat <<'EOF'
+command -v bat >/dev/null 2>&1 && export FZF_CTRL_T_OPTS="--preview 'bat -n --color=always --line-range :200 {}'"
+EOF
+  fi
+  if sel fzf; then cat <<'EOF'
 # fzf setup
 [ -f $HOME/.fzf.zsh ] && source $HOME/.fzf.zsh
 EOF
-    fi
-    if sel zoxide; then cat <<'EOF'
+  fi
+  if sel zoxide; then cat <<'EOF'
 
 # zoxide (z / zi)
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 EOF
-    fi
-    if sel usercfg; then cat <<'EOF'
+  fi
+  if sel atuin; then cat <<'EOF'
+
+# atuin owns Ctrl-R (after fzf); Up/Down stay with history-substring-search
+command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh --disable-up-arrow)"
+EOF
+  fi
+  if sel direnv; then cat <<'EOF'
+
+# direnv (.envrc per directory)
+command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
+EOF
+  fi
+  if sel lazygit; then cat <<'EOF'
+
+alias lg=lazygit
+EOF
+  fi
+  if sel usercfg; then cat <<'EOF'
 
 # Set personal aliases
 alias zshconfig="nano ~/.zshrc"
-alias ohmyzsh="nano ~/.oh-my-zsh"
 
 # Enable history timestamps
 HIST_STAMPS="yyyy-mm-dd"
 EOF
-      if sel p_histsub; then cat <<'EOF'
+    if sel p_histsub; then cat <<'EOF'
 
 # History substring search bindings (↑/↓)
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 EOF
-      fi
     fi
   fi
 
@@ -316,6 +339,26 @@ zstyle ':fzf-tab:*' switch-group '<' '>'
 EOF
   fi
 
+  if sel zhelp; then cat <<'EOF'
+
+
+#### zhelp ####
+zhelp() {
+  local g="$HOME/.config/zsh-setup/glossary.tsv" fmt='{printf "%-6s %-26s %s\n", $2, $3, $4}'
+  [[ -f "$g" ]] || { echo "zhelp: $g missing (run install_update_zsh.sh --update)"; return 1; }
+  if [[ -n "$1" ]]; then
+    echo "-- glossary --"; grep -i -- "$*" "$g" | awk -F'\t' "$fmt"
+    echo "-- aliases --"; alias | grep -i -- "$*"
+    echo "-- functions --"; print -l ${(k)functions} | grep -v '^_' | grep -i -- "$*" | head -20
+  elif command -v fzf >/dev/null 2>&1; then
+    awk -F'\t' "$fmt" "$g" | fzf --prompt='zhelp> ' --no-sort
+  else
+    awk -F'\t' "$fmt" "$g" | ${PAGER:-less}
+  fi
+}
+EOF
+  fi
+
   # Oh My Posh must stay last
   if sel omp; then
     printf '\n\n#### Oh My Posh theme ####\n'
@@ -330,6 +373,48 @@ EOF
     printf "    PROMPT='%%F{cyan}%%n@%%m%%f:%%F{yellow}%%~%%f %%# '\n"
     printf '  fi\n'
     printf 'fi\n'
+  fi
+}
+
+emit_plugins() {
+  echo "# Generated by install_update_zsh.sh from the selected modules; edit the selection, not this file"
+  if sel p_git || sel p_ssh; then
+    echo "getantidote/use-omz"
+    echo "ohmyzsh/ohmyzsh path:lib"
+  fi
+  if sel p_git;      then echo "ohmyzsh/ohmyzsh path:plugins/git"; fi
+  if sel p_ssh;      then echo "ohmyzsh/ohmyzsh path:plugins/ssh-agent"; fi
+  if sel p_aliastip; then echo "djui/alias-tips"; fi
+  echo "mattmc3/ez-compinit"
+  if sel p_fzftab;   then echo "Aloxaf/fzf-tab"; fi
+  if sel p_histsub;  then echo "zsh-users/zsh-history-substring-search"; fi
+  if sel p_autosug || sel p_fsh; then echo "romkatv/zsh-defer"; fi
+  if sel p_autosug;  then echo "zsh-users/zsh-autosuggestions kind:defer"; fi
+  if sel p_fsh;      then echo "zdharma-continuum/fast-syntax-highlighting kind:defer"; fi
+}
+
+write_plugins() {
+  local tmp
+  tmp="$(mktemp)"
+  emit_plugins > "$tmp"
+  sync_file "$tmp" "$HOME/.zsh_plugins.txt" "plugin list"
+  rm -f "$tmp"
+}
+
+antidote_src() {
+  local f
+  for f in "${HOMEBREW_PREFIX:-/opt/homebrew}/opt/antidote/share/antidote/antidote.zsh" "$HOME/.antidote/antidote.zsh"; do
+    if [[ -r "$f" ]]; then echo "$f"; return 0; fi
+  done
+  return 1
+}
+
+build_plugins() {
+  local src
+  if src="$(antidote_src)"; then
+    run zsh -c "source '$src'; antidote bundle < \"\$HOME/.zsh_plugins.txt\" > \"\$HOME/.zsh_plugins.zsh\""
+  else
+    echo "  antidote not found; plugins will be cloned on the next shell start once it is installed."
   fi
 }
 
@@ -365,16 +450,14 @@ if [[ "$ZSHRC_ONLY" == "0" ]]; then
     done
   fi
 
-  if sel omz; then
-    if [[ -d "$HOME/.oh-my-zsh" ]]; then
-      echo "  ok: Oh My Zsh"
+  if sel antidote; then
+    if [[ "$OS_TYPE" == "Darwin" ]]; then
+      pkg antidote
+    elif [[ -d "$HOME/.antidote" ]]; then
+      run git -C "$HOME/.antidote" pull --ff-only
     else
-      run bash -c 'curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | sh -s -- --unattended'
+      run git clone --depth 1 https://github.com/mattmc3/antidote.git "$HOME/.antidote"
     fi
-  fi
-
-  if sel antigen; then
-    if dry; then echo "  [dry-run] curl -fsSL https://git.io/antigen > ~/.antigen.zsh"; else curl -fsSL https://git.io/antigen > "$HOME/.antigen.zsh"; fi
   fi
 
   if sel fzf; then
@@ -394,6 +477,13 @@ if [[ "$ZSHRC_ONLY" == "0" ]]; then
   fi
 
   if sel eza; then pkg eza; fi
+  if sel bat; then pkg bat; fi
+  if sel fd; then pkg fd fd-find; fi
+  if sel atuin; then pkg atuin; fi
+  if sel delta; then pkg git-delta; fi
+  if sel lazygit; then pkg lazygit; fi
+  if sel mise; then pkg mise; fi
+  if sel direnv; then pkg direnv; fi
 
   if sel omp; then
     if [[ "$OS_TYPE" == "Darwin" ]]; then
@@ -408,8 +498,53 @@ if [[ "$ZSHRC_ONLY" == "0" ]]; then
   if sel font && [[ "$OS_TYPE" == "Darwin" ]]; then cask font-meslo-lg-nerd-font; fi
 fi
 
+sync_file() { # sync_file <src> <dest> <label>
+  if [[ -f "$2" ]] && cmp -s "$1" "$2"; then
+    echo "$3 already up to date."
+  elif dry; then
+    echo "[dry-run] $3 would be written to $2"
+  else
+    mkdir -p "$(dirname "$2")"; cp "$1" "$2"; echo "Wrote $3 ($2)"
+  fi
+}
+
+write_glossary() {
+  local tmp mod kind name desc
+  tmp="$(mktemp)"
+  while IFS=$'\t' read -r mod kind name desc; do
+    if [[ -z "$mod" || "$mod" == \#* ]]; then continue; fi
+    if [[ "$mod" == "core" ]] || sel "$mod"; then printf '%s\t%s\t%s\t%s\n' "$mod" "$kind" "$name" "$desc" >> "$tmp"; fi
+  done < "$REPO_DIR/share/glossary.tsv"
+  sync_file "$tmp" "$GLOSSARY_DEST" "zhelp glossary"
+  rm -f "$tmp"
+}
+
+setup_delta() {
+  local dest="$CONFIG_DIR/delta.gitconfig"
+  sync_file "$REPO_DIR/share/delta.gitconfig" "$dest" "delta git config"
+  if git config --global --get-all include.path 2>/dev/null | grep -qxF "$dest"; then
+    echo "  git include.path already set."
+  else
+    run git config --global --add include.path "$dest"
+  fi
+}
+
+import_atuin_history() {
+  if command -v atuin >/dev/null 2>&1 && [[ -f "$HOME/.zsh_history" && ! -f "$CONFIG_DIR/atuin-imported" ]]; then
+    run atuin import zsh
+    if ! dry; then mkdir -p "$CONFIG_DIR"; touch "$CONFIG_DIR/atuin-imported"; fi
+  fi
+}
+
 echo; echo "== Zsh config =="
 write_zshrc
+if sel antidote; then write_plugins; fi
+if sel zhelp; then write_glossary; fi
+if [[ "$ZSHRC_ONLY" == "0" ]]; then
+  if sel antidote && [[ "$DRY_RUN" != "1" ]]; then build_plugins; fi
+  if sel delta; then setup_delta; fi
+  if sel atuin; then import_atuin_history; fi
+fi
 
 # ------------------------------ Terminal apps ----------------------------------
 if sel iterm2; then

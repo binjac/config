@@ -1,0 +1,43 @@
+# module<TAB>kind<TAB>name<TAB>description   (module = core or a module id; only selected modules are installed by the installer)
+core	fn	zhelp	This glossary. zhelp <term> also greps live aliases and functions
+usercfg	alias	zshconfig	Edit ~/.zshrc (nano)
+fzf	key	Ctrl-T	Fuzzy-pick a file and paste its path
+fzf	key	Alt-C	Fuzzy-pick a sub-directory and cd into it
+fzf	key	Ctrl-R	Fuzzy history search (atuin takes over when installed)
+fzf	cmd	fzf	Fuzzy finder: ls | fzf, git branch | fzf
+p_fzftab	key	Tab	fzf-powered completion (Tab accepts, < and > switch groups)
+p_histsub	key	Up/Down	Walk history entries matching what you already typed
+p_autosug	key	Right arrow	Accept the grey autosuggestion
+p_aliastip	cmd	alias-tips	Prints the alias you could have typed after a long command
+p_fsh	cmd	fast-syntax-highlighting	Colors valid/invalid commands while typing (fsh-alias, fast-theme)
+p_ssh	cmd	ssh-agent	Agent started on first shell, loads ~/.ssh/id_ed25519
+p_git	alias	gst	git status
+p_git	alias	ga / gaa	git add / git add --all
+p_git	alias	gcmsg	git commit -m
+p_git	alias	gc	git commit -v
+p_git	alias	gco	git checkout
+p_git	alias	gb	git branch
+p_git	alias	gp / gl	git push / git pull
+p_git	alias	gd	git diff
+p_git	alias	glog	git log --oneline --decorate --graph
+p_git	cmd	zhelp git	List every git alias defined right now (about 200)
+zoxide	cmd	z <part>	Jump to the most frecent directory matching <part>
+zoxide	cmd	zi	Interactive directory jump (fzf)
+zoxide	cmd	zoxide query -ls	Show the ranked directory database
+eza	cmd	eza	Modern ls (used for the cd preview in fzf-tab)
+bat	cmd	bat <file>	cat with syntax highlighting, line numbers and git marks (also the Ctrl-T preview)
+fd	cmd	fd <pattern>	Fast find, ignores .git and .gitignore (fd -H for hidden files)
+atuin	key	Ctrl-R	Search shell history: per directory, exit code, duration
+atuin	cmd	atuin stats	Most used commands
+atuin	cmd	atuin search <text>	Non-interactive history search
+delta	cmd	git diff / log / show	Rendered through delta (n / N jump between files)
+lazygit	alias	lg	Terminal UI for git (stage lines, rebase, branches, stash)
+mise	cmd	mise use python@3.12	Pin a tool version in .mise.toml for this project
+mise	cmd	mise ls / mise install	List / install the versions pinned in .mise.toml
+direnv	cmd	direnv allow	Trust the .envrc of this directory so it loads on cd
+direnv	cmd	direnv deny	Stop loading this directory's .envrc
+conda	cmd	conda activate <env>	Activate a conda environment (base is active by default)
+omp	cmd	oh-my-posh	Prompt engine; theme file in ~/.config/oh-my-posh/
+vscode	cmd	VS Code guard	The shell stops early while VS Code resolves its environment
+antidote	cmd	antidote update	Update all plugins listed in ~/.zsh_plugins.txt
+antidote	cmd	antidote list	Show the installed plugins

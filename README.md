@@ -1,38 +1,58 @@
 ## Terminal Setup
 
-This repo bootstraps a consistent Zsh+iTerm2 environment on macOS or Linux.
+Modular Zsh + iTerm2 / Terminal.app bootstrap for macOS and Linux. You pick the modules; the same script installs them and generates `~/.zshrc`, so every machine ends up identical.
 
-## Installation
+## First install
+
 ```sh
-git clone https://github.com/binjac/config.git ~/config
+git clone git@github.com:binjac/config.git ~/config
 cd ~/config
-chmod +x install_update_zsh.sh
-./install_update_zsh.sh
-cd ~
-rm -rf ~/config
+./install_update_zsh.sh          # asks FULL (defaults) or CUSTOM (pick each module)
 exec zsh
 ```
 
-### Prompt: Oh My Posh
+Keep the clone: it is what `--update` pulls from.
 
-- **Engine:** [oh-my-posh](https://ohmyposh.dev/)
-- **Theme (default):** `easy-term` (set via `OMP_THEME_URL`, defaults to the raw URL from OMP’s repo)
-- **Why OMP?** Fast, portable, themeable JSON config, great glyph support with Nerd Fonts.
+## Update a machine that already has the config
 
-**Switch theme:**  
-Change the env var when running the installer, e.g.:
-```bash
-OMP_THEME_URL="https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/kushal.omp.json" ./install_update_zsh.sh
+```sh
+cd ~/config
+./install_update_zsh.sh --update
+exec zsh
 ```
 
-### Zsh Plugins (via Antigen)
+`--update` runs `git pull --ff-only`, re-runs the fresh script, reuses the modules chosen on this machine (saved in `~/.config/zsh-setup/selection.env`), asks only about modules added since, installs what is missing, then regenerates `~/.zshrc` (old one backed up as `~/.zshrc.bak.<timestamp>`, diff printed). Add `--full` to accept defaults for new modules without prompts.
 
-- **git** — Git aliases and completions  
-- **zsh-users/zsh-autosuggestions** — Inline history-based suggestions as you type  
-- **zsh-users/zsh-history-substring-search** — Use ↑/↓ to search history by substring  
-- **djui/alias-tips** — Shows the alias you could’ve used after typing a long command  
-- **rupa/z** — Quickly jump to frequently used directories by substring  
-- **junegunn/fzf** — Fuzzy finder, Ctrl-R history search, file search, etc.  
-- **ssh-agent** — Auto-starts and loads your SSH keys  
-- **Aloxaf/fzf-tab** — FZF-powered tab completion UI  
-- **zsh-users/zsh-syntax-highlighting** — Highlights valid commands, flags, and errors  
+On a machine configured before the selection file existed, the first `--update` asks the usual FULL/CUSTOM question, then remembers the answers.
+
+## Options
+
+| Flag | Effect |
+| --- | --- |
+| `--full` | accept the default answer to every question |
+| `--custom` | ask about every module |
+| `--update` | pull the repo, reuse saved modules, ask only about new ones |
+| `--zshrc-only` | only regenerate `~/.zshrc` (no install, no terminal setup, nothing saved) |
+| `--dry-run` | change nothing; print the actions and the diff of the generated `~/.zshrc` |
+
+`OMP_THEME_URL` picks the oh-my-posh theme (default `kushal`); the theme is downloaded once to `~/.config/oh-my-posh/` so the prompt does not depend on the network.
+
+## Modules
+
+| Group | Modules |
+| --- | --- |
+| Tools | base (zsh git curl), fzf, zoxide, eza, oh-my-posh, Meslo Nerd Font |
+| Framework | Oh My Zsh, Antigen |
+| Plugins | git, zsh-autosuggestions, zsh-history-substring-search, alias-tips, fzf, ssh-agent, fzf-tab, zsh-syntax-highlighting |
+| Shell config | conda init, VS Code guard, aliases / history timestamps / key bindings |
+| Terminal apps (macOS) | iTerm2 (cask + Dynamic Profile from `terminal_config/Custom.json`), Terminal.app profile (`terminal_config/Custom.terminal`) |
+
+Dependencies are enabled automatically (fzf-tab needs fzf, the terminal profiles need the Nerd Font).
+
+- **zoxide** replaces `z` / autojump: same `z` command, plus `zi` for interactive selection. Existing `~/.z` history is imported on first install.
+- **VS Code guard**: VS Code resolves its environment with a tty-less login shell. The generated `.zshrc` returns early in that case (`VSCODE_RESOLVING_ENVIRONMENT`), which avoids the "unable to resolve shell environment" timeouts.
+- **Terminal profiles**: `Custom.json` is the iTerm2 profile export; the installer wraps it as a Dynamic Profile and sets it as default. `Custom.terminal` is the Terminal.app profile.
+
+## Secrets
+
+Never put tokens in this repo or in `~/.zshrc`. Copy `.zprofile.example` to `~/.zprofile` (or a `600` file it sources), fill in the values and `chmod 600` it.

@@ -1,0 +1,21 @@
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/google-cloud-sdk/bin:$PATH"
+
+# Databricks
+export DATABRICKS_HOST="https://<workspace>.cloud.databricks.com"
+export DATABRICKS_TOKEN="<set-me>"
+
+# Vault
+export VAULT_ADDR="https://vault.example.com"
+export VAULT_AUTH_GITHUB_TOKEN="<set-me>"
+
+# Docker x colima
+export DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+
+# Java
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export PATH="$JAVA_HOME/bin:$PATH"

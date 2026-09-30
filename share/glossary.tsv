@@ -1,7 +1,6 @@
 # module<TAB>kind<TAB>name<TAB>description   (module = core or a module id; only selected modules are installed by the installer)
 core	fn	zhelp	This glossary. zhelp <term> also greps live aliases and functions
 usercfg	alias	zshconfig	Edit ~/.zshrc (nano)
-usercfg	alias	ohmyzsh	Open the Oh My Zsh folder with nano
 fzf	key	Ctrl-T	Fuzzy-pick a file and paste its path
 fzf	key	Alt-C	Fuzzy-pick a sub-directory and cd into it
 fzf	key	Ctrl-R	Fuzzy history search (atuin takes over when installed)
@@ -10,7 +9,6 @@ p_fzftab	key	Tab	fzf-powered completion (Tab accepts, < and > switch groups)
 p_histsub	key	Up/Down	Walk history entries matching what you already typed
 p_autosug	key	Right arrow	Accept the grey autosuggestion
 p_aliastip	cmd	alias-tips	Prints the alias you could have typed after a long command
-p_synhl	cmd	syntax-highlighting	Colors valid/invalid commands while typing
 p_fsh	cmd	fast-syntax-highlighting	Colors valid/invalid commands while typing (fsh-alias, fast-theme)
 p_ssh	cmd	ssh-agent	Agent started on first shell, loads ~/.ssh/id_ed25519
 p_git	alias	gst	git status

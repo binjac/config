@@ -198,6 +198,9 @@ emit_zshrc() {
   cat <<'EOF'
 # If come from bash might have to change $PATH
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
+
+# user-local binaries (claude, pipx, ...)
+export PATH="$HOME/.local/bin:$PATH"
 EOF
 
   if sel conda; then cat <<'EOF'

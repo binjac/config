@@ -40,7 +40,7 @@ In a terminal on macOS the run shows a live display (`share/ui.py`, rich, instal
 
 `OMP_THEME_URL` picks the oh-my-posh theme (default `kushal`); the theme is downloaded once to `~/.config/oh-my-posh/` so the prompt does not depend on the network.
 
-If Homebrew is missing and its module is off, the tools that need it are reported as skipped; enable the module (or install Homebrew) and rerun `./install_update_zsh.sh --update --full`. iTerm2 fonts are only applied while iTerm2 is closed (it would overwrite them); Terminal.app is updated live.
+If Homebrew is missing and its module is off, the tools that need it are reported as skipped; enable the module (or install Homebrew) and rerun `./install_update_zsh.sh --update --full`. Before applying the font, `share/apply_font.py` checks that macOS resolves `MesloLGSNFM-Regular`; if not (files quarantined or unregistered, apps then fall back to Menlo) it strips the quarantine flag, resets the user font cache and restarts `fontd`, and the step fails if the font is still not found. iTerm2 fonts are only applied while iTerm2 is closed (it would overwrite them); Terminal.app is updated live.
 
 ## Modules
 

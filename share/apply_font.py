@@ -21,8 +21,31 @@ STAMP = time.strftime("%Y%m%d-%H%M%S")
 CHANGED, ERROR, SKIPPED, SAME = 0, 1, 2, 3
 
 
-def font_installed() -> bool:
-    return any(list(d.glob("MesloLGSNerdFontMono-Regular*")) for d in (HOME / "Library/Fonts", Path("/Library/Fonts")))
+def font_files():
+    return [f for d in (HOME / "Library/Fonts", Path("/Library/Fonts")) for f in d.glob("MesloLGS*NerdFont*.ttf")]
+
+
+def font_resolves() -> bool:
+    script = 'ObjC.import("AppKit"); $.NSFont.fontWithNameSize("%s", 13).isNil() ? "no" : "yes"' % FONT_PS
+    out = subprocess.run(["osascript", "-l", "JavaScript", "-e", script], capture_output=True, text=True)
+    return out.stdout.strip() == "yes"
+
+
+def ensure_font() -> str:
+    """Empty string when macOS resolves the font, else the reason. Quarantined or unregistered files make apps fall back to Menlo."""
+    if not font_files():
+        return "MesloLGS Nerd Font Mono not installed"
+    if font_resolves():
+        return ""
+    for f in font_files():
+        subprocess.run(["xattr", "-d", "com.apple.quarantine", str(f)], capture_output=True)
+    subprocess.run(["atsutil", "databases", "-removeUser"], capture_output=True)
+    subprocess.run(["killall", "fontd"], capture_output=True)
+    for _ in range(10):
+        time.sleep(1)
+        if font_resolves():
+            return ""
+    return "macOS does not resolve MesloLGSNFM-Regular (Font Book may show why)"
 
 
 def iterm():
@@ -127,9 +150,10 @@ def main() -> int:
     if len(sys.argv) != 2 or sys.argv[1] not in ("iterm", "terminal", "vscode"):
         print(__doc__)
         return ERROR
-    if not font_installed():
-        print("MesloLGS Nerd Font Mono not installed")
-        return SKIPPED
+    problem = ensure_font()
+    if problem:
+        print(problem)
+        return SKIPPED if "not installed" in problem else ERROR
     code, msg = {"iterm": iterm, "terminal": terminal, "vscode": vscode}[sys.argv[1]]()
     print(msg)
     return code

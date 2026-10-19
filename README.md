@@ -34,18 +34,23 @@ On a machine configured before the selection file existed, the first `--update` 
 | `--update` | pull the repo, reuse saved modules, ask only about new ones |
 | `--zshrc-only` | only regenerate `~/.zshrc` (no install, no terminal setup, nothing saved) |
 | `--dry-run` | change nothing; print the actions and the diff of the generated `~/.zshrc` |
+| `--plain` | no live display, one line per action |
+
+In a terminal on macOS the run shows a live display (`share/ui.py`, rich, installed in `~/.config/zsh-setup/venv` on first run): one progress bar per phase (Tools, Shell config, Terminal apps), the steps in flight, then a results panel listing what was skipped or failed and what to do next. Command output goes to `~/.config/zsh-setup/install.log`. Without a terminal, with `--dry-run` or `--plain`, it prints one line per action.
 
 `OMP_THEME_URL` picks the oh-my-posh theme (default `kushal`); the theme is downloaded once to `~/.config/oh-my-posh/` so the prompt does not depend on the network.
+
+If Homebrew is missing and its module is off, the tools that need it are reported as skipped; enable the module (or install Homebrew) and rerun `./install_update_zsh.sh --update --full`. iTerm2 fonts are only applied while iTerm2 is closed (it would overwrite them); Terminal.app is updated live.
 
 ## Modules
 
 | Group | Modules |
 | --- | --- |
-| Tools | base (zsh git curl), fzf, zoxide, eza, oh-my-posh, Meslo Nerd Font, bat, fd, atuin, git-delta, lazygit, mise, direnv |
+| Tools | Homebrew (installed if missing, updated otherwise), base (zsh git curl), fzf, zoxide, eza, oh-my-posh, Meslo Nerd Font, bat, fd, atuin, git-delta, lazygit, mise, direnv |
 | Plugin manager | antidote (+ zsh-defer) |
 | Plugins | git, zsh-autosuggestions, zsh-history-substring-search, alias-tips, ssh-agent, fzf-tab, fast-syntax-highlighting |
 | Shell config | conda init, VS Code guard, aliases / history timestamps / key bindings, `zhelp` |
-| Terminal apps (macOS) | iTerm2 (cask + Dynamic Profile from `terminal_config/Custom.json`), Terminal.app profile (`terminal_config/Custom.terminal`) |
+| Terminal apps (macOS) | iTerm2 (cask + Dynamic Profile from `terminal_config/Custom.json`), Terminal.app profile (`terminal_config/Custom.terminal`), then MesloLGS Nerd Font Mono Regular 13 set in every iTerm2 and Terminal.app profile and in the VS Code integrated terminal (`share/apply_font.py`) |
 
 Dependencies are enabled automatically (fzf-tab needs fzf, the terminal profiles need the Nerd Font). Only the macOS path has been tested; on Linux most of the newer tools are not in `apt` and are skipped with a message (the `.zshrc` guards every init with `command -v`).
 

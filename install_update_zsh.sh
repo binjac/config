@@ -8,6 +8,7 @@ INSTALL_MODE="${INSTALL_MODE:-}"
 DRY_RUN="${DRY_RUN:-0}"
 ZSHRC_ONLY=0
 UPDATE=0
+PLAIN="${PLAIN:-0}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zsh-setup"
 SELECTION_FILE="$CONFIG_DIR/selection.env"
 GLOSSARY_DEST="$CONFIG_DIR/glossary.tsv"
@@ -19,13 +20,14 @@ TERMINAL_FILE="$REPO_DIR/terminal_config/Custom.terminal"
 
 usage() {
   cat <<'EOF'
-Usage: ./install_update_zsh.sh [--full | --custom] [--update] [--zshrc-only] [--dry-run]
+Usage: ./install_update_zsh.sh [--full | --custom] [--update] [--zshrc-only] [--dry-run] [--plain]
   --full         accept the default answer to every question
   --custom       ask about every module
   --update       machine already set up: git pull this repo, reuse the modules saved on
                  this machine, only ask about new ones, then re-apply everything
   --zshrc-only   only regenerate ~/.zshrc (no install, no terminal setup)
   --dry-run      change nothing: print actions and the diff of the generated ~/.zshrc
+  --plain        no live display, one line per action
 EOF
 }
 
@@ -36,6 +38,7 @@ for arg in "$@"; do
     --zshrc-only) INSTALL_MODE="FULL"; ZSHRC_ONLY=1 ;;
     --update) UPDATE=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --plain) PLAIN=1 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -53,9 +56,23 @@ fi
 dry() { [[ "$DRY_RUN" == "1" ]]; }
 timestamp() { date +"%Y%m%d-%H%M%S"; }
 
+# Step state of the action being run (read by run_queue): done | have | skip | fail
+STEP_STATE=done; STEP_NOTE=""
+UI_ON=0; UI_USED=0; UI_PID=""; UI_LOG=""
+NEXT_STEPS=""; RECAP=""; BREW_MISSING=0
+
+last_log_line() { if [[ -n "$UI_LOG" && -f "$UI_LOG" ]]; then tail -n 1 "$UI_LOG" | cut -c1-140; fi; }
+mark_done() { if [[ "$STEP_STATE" == "done" ]]; then STEP_NOTE="${1:-}"; fi; }
+have_step() { if [[ "$STEP_STATE" == "done" ]]; then STEP_STATE=have; STEP_NOTE="${1:-}"; fi; }
+skip_step() { if [[ "$STEP_STATE" == "done" ]]; then STEP_STATE=skip; STEP_NOTE="${1:-}"; fi; }
+next_step() { NEXT_STEPS="${NEXT_STEPS}${1}"$'\n'; }
+
 run() {
   if dry; then echo "  [dry-run] $*"; return 0; fi
-  "$@" || { echo "  ! failed: $*" >&2; return 0; }
+  if "$@"; then return 0; fi
+  STEP_STATE=fail; STEP_NOTE="$(last_log_line)"; [[ -n "$STEP_NOTE" ]] || STEP_NOTE="$* failed"
+  echo "  ! failed: $*" >&2
+  return 0
 }
 
 ask() {
@@ -88,41 +105,144 @@ need() {
   fi
 }
 
-ensure_brew() {
-  command -v brew >/dev/null 2>&1 && return 0
-  if ask "Homebrew not found. Install it now?" "N"; then
+brew_ok() { command -v brew >/dev/null 2>&1; }
+
+find_brew() {
+  local b
+  for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [[ -x "$b" ]]; then eval "$("$b" shellenv)"; return 0; fi
+  done
+  return 1
+}
+
+# Runs before the live display: the Homebrew installer needs the terminal (sudo password, Enter)
+BREW_JUST_INSTALLED=0
+preflight_brew() {
+  [[ "$OS_TYPE" == "Darwin" ]] || return 0
+  if ! brew_ok && find_brew; then echo "Homebrew found at $(command -v brew) (was not on PATH)."; fi
+  if ! brew_ok && sel homebrew; then
+    echo "Installing Homebrew (may ask for your password)..."
     run bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-    if ! dry && [[ -x /opt/homebrew/bin/brew ]]; then
-      grep -qs 'brew shellenv' "$HOME/.zprofile" || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
-      eval "$(/opt/homebrew/bin/brew shellenv)"
+    if ! dry; then
+      find_brew || true
+      if brew_ok; then BREW_JUST_INSTALLED=1; fi
     fi
-  else
-    echo "  Homebrew not installed; Homebrew-dependent steps are skipped."
   fi
-  command -v brew >/dev/null 2>&1
+  if brew_ok && ! dry && ! grep -qs 'brew shellenv' "$HOME/.zprofile" 2>/dev/null; then
+    echo "eval \"\$($(command -v brew) shellenv)\"" >> "$HOME/.zprofile"
+  fi
+  if ! brew_ok; then
+    BREW_MISSING=1
+    next_step "Homebrew is missing: rerun $REPO_DIR/$(basename "${BASH_SOURCE[0]}") --update --full (the Homebrew module installs it)"
+  fi
+  return 0
+}
+
+step_homebrew() {
+  if ! brew_ok; then skip_step "not installed (Homebrew module off or install failed)"; return 0; fi
+  if [[ "$BREW_JUST_INSTALLED" == "1" ]]; then mark_done "installed"; return 0; fi
+  run brew update --quiet; mark_done "updated"
 }
 
 pkg() { # pkg <brew-name> [apt-name]
   local brew_name="$1" apt_name="${2:-$1}"
   if [[ "$OS_TYPE" == "Darwin" ]]; then
-    if ensure_brew; then
-      if brew list --formula "$brew_name" >/dev/null 2>&1; then echo "  ok: $brew_name"; else run brew install "$brew_name"; fi
-    fi
+    if ! brew_ok; then skip_step "needs Homebrew"; return 0; fi
+    if brew list --formula "$brew_name" >/dev/null 2>&1; then echo "  ok: $brew_name"; have_step "already installed"; else run brew install "$brew_name"; mark_done "installed"; fi
   else
-    if dpkg -s "$apt_name" >/dev/null 2>&1; then echo "  ok: $apt_name"; else run sudo apt install -y "$apt_name"; fi
+    if dpkg -s "$apt_name" >/dev/null 2>&1; then echo "  ok: $apt_name"; have_step "already installed"; else run sudo apt install -y "$apt_name"; mark_done "installed"; fi
   fi
 }
 
 cask() { # cask <name> [app-path ...]
   local name="$1" app found=0; shift
   for app in "$@"; do [[ -d "$app" ]] && found=1; done
-  if ensure_brew; then
-    if [[ "$found" == "1" ]] || brew list --cask "$name" >/dev/null 2>&1; then
-      echo "  ok: $name"
-    else
-      run brew install --cask "$name"
-    fi
+  if ! brew_ok; then skip_step "needs Homebrew"; return 0; fi
+  if [[ "$found" == "1" ]] || brew list --cask "$name" >/dev/null 2>&1; then
+    echo "  ok: $name"; have_step "already installed"
+  else
+    run brew install --cask "$name"; mark_done "installed"
   fi
+}
+
+# ------------------------------ Live display ------------------------------------
+# share/ui.py (rich) draws the progress from events written to fd 3; everything else goes to the log file while it runs.
+ui_python() {
+  local py="$CONFIG_DIR/venv/bin/python"
+  xcode-select -p >/dev/null 2>&1 || return 1
+  mkdir -p "$CONFIG_DIR"
+  if [[ ! -x "$py" ]]; then python3 -m venv "$CONFIG_DIR/venv" >/dev/null 2>&1 || return 1; fi
+  if ! "$py" -c "import rich" >/dev/null 2>&1; then
+    echo "Installing the display library (rich, first run only)..." >&2
+    "$py" -m pip install --quiet rich >/dev/null 2>&1 || return 1
+  fi
+  echo "$py"
+}
+
+ui() { # ui <kind> <field>...: no-op without the live display
+  [[ "$UI_ON" == "1" ]] || return 0
+  local IFS=$'\t'
+  printf '%s\n' "$*" >&3 2>/dev/null || true
+}
+
+ui_start() {
+  dry && return 0
+  [[ "$PLAIN" != "1" && -t 1 && "$OS_TYPE" == "Darwin" ]] || return 0
+  local py fifo
+  py="$(ui_python)" || { echo "Live display unavailable (python3 + rich needed); using plain output."; return 0; }
+  fifo="$(mktemp -u "${TMPDIR:-/tmp}/zshsetup-ui.XXXXXX")"
+  mkfifo "$fifo" || return 0
+  UI_LOG="$CONFIG_DIR/install.log"; : > "$UI_LOG"
+  "$py" "$REPO_DIR/share/ui.py" < "$fifo" &
+  UI_PID=$!
+  exec 3> "$fifo"
+  rm -f "$fifo"
+  trap '' PIPE
+  exec 4>&1 5>&2
+  exec >> "$UI_LOG" 2>&1
+  UI_ON=1; UI_USED=1
+}
+
+ui_stop() {
+  [[ "$UI_ON" == "1" ]] || return 0
+  UI_ON=0
+  exec 1>&4 2>&5 3>&- 4>&- 5>&-
+  wait "$UI_PID" 2>/dev/null || true
+}
+trap ui_stop EXIT
+
+# ------------------------------ Step queue --------------------------------------
+Q_PHASE=(); Q_KEY=(); Q_LABEL=(); Q_CMD=()
+queue() { # queue <phase> <key> <label> <command...>
+  Q_PHASE+=("$1"); Q_KEY+=("$2"); Q_LABEL+=("$3"); shift 3
+  Q_CMD+=("$(printf '%q ' "$@")")
+}
+
+run_queue() {
+  local n=${#Q_PHASE[@]} i ph tot last="" t0 note failed=0
+  if [[ "$UI_ON" == "1" ]]; then
+    ui H "Terminal setup" "$REPO_DIR" "mode $INSTALL_MODE$([[ "$UPDATE" == "1" ]] && echo ' + update')"
+    for ph in "Tools" "Shell config" "Terminal apps"; do
+      tot=0
+      for ((i=0; i<n; i++)); do if [[ "${Q_PHASE[$i]}" == "$ph" ]]; then tot=$((tot+1)); fi; done
+      if [[ "$tot" -gt 0 ]]; then ui P "$ph" "$tot"; fi
+    done
+  fi
+  for ((i=0; i<n; i++)); do
+    ph="${Q_PHASE[$i]}"
+    if [[ "$UI_ON" != "1" && "$ph" != "$last" ]]; then echo; echo "== $ph =="; last="$ph"; fi
+    STEP_STATE=done; STEP_NOTE=""
+    ui B "$ph" "${Q_KEY[$i]}" "${Q_LABEL[$i]}"
+    t0=$SECONDS
+    eval "${Q_CMD[$i]}"
+    note="${STEP_NOTE//$'\t'/ }"; note="${note//$'\n'/ }"
+    ui E "$ph" "${Q_KEY[$i]}" "$STEP_STATE" "$((SECONDS - t0))" "$note"
+    case "$STEP_STATE" in
+      skip|fail) RECAP="${RECAP}  [${STEP_STATE}] ${Q_KEY[$i]}: ${note}"$'\n' ;;
+    esac
+    if [[ "$STEP_STATE" == "fail" ]]; then failed=1; fi
+  done
+  return "$failed"
 }
 
 # ------------------------------ Module selection -------------------------------
@@ -139,6 +259,7 @@ echo "Mode: $INSTALL_MODE$([[ "$UPDATE" == "1" ]] && echo ' + update')$(dry && e
 
 echo; echo "== Tools =="
 pick base    "Base dependencies (zsh git curl)?" "Y"
+if [[ "$OS_TYPE" == "Darwin" ]]; then pick homebrew "Homebrew (installed if missing, updated otherwise; most tools below need it)?" "Y"; else skip homebrew; fi
 pick fzf     "fzf (fuzzy finder, Ctrl-R, key-bindings)?" "Y"
 pick zoxide  "zoxide (smarter cd: z / zi)?" "Y"
 pick eza     "eza (fzf-tab directory preview)?" "Y"
@@ -173,7 +294,7 @@ else
   for m in p_git p_autosug p_histsub p_aliastip p_ssh p_fzftab p_fsh; do skip "$m"; done
 fi
 
-echo; echo "== Shell config =="
+echo; echo "== Shell options =="
 conda_default="N"; [[ -d "$HOME/anaconda3" ]] && conda_default="Y"
 pick conda   "Conda init block (\$HOME/anaconda3)?" "$conda_default"
 pick vscode  "VS Code guard (skip prompt/plugins while VS Code resolves its env)?" "Y"
@@ -192,12 +313,17 @@ fi
 need p_fzftab fzf
 need iterm2 font
 need terminalapp font
+if [[ "$ZSHRC_ONLY" == "0" ]]; then preflight_brew; fi
 
 # ------------------------------ zshrc generation -------------------------------
 emit_zshrc() {
   cat <<'EOF'
 # If come from bash might have to change $PATH
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
+
+# user-local binaries (claude, pipx, ...) and opencode
+export PATH="$HOME/.local/bin:$PATH"
+[[ -d "$HOME/.opencode/bin" ]] && export PATH="$HOME/.opencode/bin:$PATH"
 EOF
 
   if sel conda; then cat <<'EOF'
@@ -408,21 +534,12 @@ antidote_src() {
   return 1
 }
 
-build_plugins() {
-  local src
-  if src="$(antidote_src)"; then
-    run zsh -c "source '$src'; antidote bundle < \"\$HOME/.zsh_plugins.txt\" > \"\$HOME/.zsh_plugins.zsh\""
-  else
-    echo "  antidote not found; plugins will be cloned on the next shell start once it is installed."
-  fi
-}
-
 write_zshrc() {
   local target="$HOME/.zshrc" tmp
   tmp="$(mktemp)"
   emit_zshrc > "$tmp"
   if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
-    echo "~/.zshrc already up to date."
+    echo "~/.zshrc already up to date."; have_step "already up to date"
   elif dry; then
     echo "[dry-run] ~/.zshrc would change:"
     diff -u "$target" "$tmp" || true
@@ -433,77 +550,19 @@ write_zshrc() {
       echo "Backed up ~/.zshrc -> ~/.zshrc.bak.*"
     fi
     cp "$tmp" "$target"
-    echo "Wrote ~/.zshrc"
+    echo "Wrote ~/.zshrc"; mark_done "written, previous one backed up"
   fi
   rm -f "$tmp"
 }
 
-# ------------------------------ Installs ---------------------------------------
-if [[ "$ZSHRC_ONLY" == "0" ]]; then
-  echo; echo "== Installing =="
-
-  if sel base; then
-    if [[ "$OS_TYPE" == "Linux" ]]; then run sudo apt update; fi
-    for t in zsh git curl; do
-      if command -v "$t" >/dev/null 2>&1; then echo "  ok: $t"; else pkg "$t"; fi
-    done
-  fi
-
-  if sel antidote; then
-    if [[ "$OS_TYPE" == "Darwin" ]]; then
-      pkg antidote
-    elif [[ -d "$HOME/.antidote" ]]; then
-      run git -C "$HOME/.antidote" pull --ff-only
-    else
-      run git clone --depth 1 https://github.com/mattmc3/antidote.git "$HOME/.antidote"
-    fi
-  fi
-
-  if sel fzf; then
-    if [[ -d "$HOME/.fzf" ]]; then
-      run git -C "$HOME/.fzf" pull --ff-only
-    else
-      run git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
-    fi
-    run "$HOME/.fzf/install" --key-bindings --completion --no-update-rc
-  fi
-
-  if sel zoxide; then
-    pkg zoxide
-    if command -v zoxide >/dev/null 2>&1 && [[ -f "$HOME/.z" && ! -f "$HOME/Library/Application Support/zoxide/db.zo" && ! -f "$HOME/.local/share/zoxide/db.zo" ]]; then
-      run zoxide import z
-    fi
-  fi
-
-  if sel eza; then pkg eza; fi
-  if sel bat; then pkg bat; fi
-  if sel fd; then pkg fd fd-find; fi
-  if sel atuin; then pkg atuin; fi
-  if sel delta; then pkg git-delta; fi
-  if sel lazygit; then pkg lazygit; fi
-  if sel mise; then pkg mise; fi
-  if sel direnv; then pkg direnv; fi
-
-  if sel omp; then
-    if [[ "$OS_TYPE" == "Darwin" ]]; then
-      pkg oh-my-posh
-    elif ! command -v oh-my-posh >/dev/null 2>&1; then
-      run bash -c 'curl -s https://ohmyposh.dev/install.sh | bash -s'
-    fi
-    run mkdir -p "$HOME/.config/oh-my-posh"
-    run curl -fsSL "$OMP_THEME_URL" -o "$HOME/.config/oh-my-posh/$OMP_THEME_NAME"
-  fi
-
-  if sel font && [[ "$OS_TYPE" == "Darwin" ]]; then cask font-meslo-lg-nerd-font; fi
-fi
-
+# ------------------------------ Steps ------------------------------------------
 sync_file() { # sync_file <src> <dest> <label>
   if [[ -f "$2" ]] && cmp -s "$1" "$2"; then
-    echo "$3 already up to date."
+    echo "$3 already up to date."; have_step "already up to date"
   elif dry; then
     echo "[dry-run] $3 would be written to $2"
   else
-    mkdir -p "$(dirname "$2")"; cp "$1" "$2"; echo "Wrote $3 ($2)"
+    mkdir -p "$(dirname "$2")"; cp "$1" "$2"; echo "Wrote $3 ($2)"; mark_done "written"
   fi
 }
 
@@ -524,78 +583,198 @@ setup_delta() {
   if git config --global --get-all include.path 2>/dev/null | grep -qxF "$dest"; then
     echo "  git include.path already set."
   else
-    run git config --global --add include.path "$dest"
+    run git config --global --add include.path "$dest"; mark_done "git include added"
   fi
 }
 
 import_atuin_history() {
-  if command -v atuin >/dev/null 2>&1 && [[ -f "$HOME/.zsh_history" && ! -f "$CONFIG_DIR/atuin-imported" ]]; then
+  if ! command -v atuin >/dev/null 2>&1; then skip_step "atuin not installed"; return 0; fi
+  if [[ -f "$HOME/.zsh_history" && ! -f "$CONFIG_DIR/atuin-imported" ]]; then
     run atuin import zsh
     if ! dry; then mkdir -p "$CONFIG_DIR"; touch "$CONFIG_DIR/atuin-imported"; fi
+    mark_done "history imported"
+  else
+    have_step "nothing to import"
   fi
 }
 
-echo; echo "== Zsh config =="
-write_zshrc
-if sel antidote; then write_plugins; fi
-if sel zhelp; then write_glossary; fi
-if [[ "$ZSHRC_ONLY" == "0" ]]; then
-  if sel antidote && [[ "$DRY_RUN" != "1" ]]; then build_plugins; fi
-  if sel delta; then setup_delta; fi
-  if sel atuin; then import_atuin_history; fi
-fi
+build_plugins() {
+  local src
+  if src="$(antidote_src)"; then
+    run zsh -c "source '$src'; antidote bundle < \"\$HOME/.zsh_plugins.txt\" > \"\$HOME/.zsh_plugins.zsh\""
+    mark_done "bundle generated"
+  else
+    echo "  antidote not found; plugins will be cloned on the next shell start once it is installed."
+    skip_step "antidote not installed"
+  fi
+}
 
-# ------------------------------ Terminal apps ----------------------------------
-if sel iterm2; then
-  echo; echo "== iTerm2 =="
+step_base() {
+  local t any=0
+  if [[ "$OS_TYPE" == "Linux" ]]; then run sudo apt update; fi
+  for t in zsh git curl; do
+    if command -v "$t" >/dev/null 2>&1; then echo "  ok: $t"; else any=1; pkg "$t"; fi
+  done
+  if [[ "$any" == "0" ]]; then have_step "already installed"; fi
+}
+
+step_antidote() {
+  if [[ "$OS_TYPE" == "Darwin" ]]; then
+    pkg antidote
+  elif [[ -d "$HOME/.antidote" ]]; then
+    run git -C "$HOME/.antidote" pull --ff-only; mark_done "updated"
+  else
+    run git clone --depth 1 https://github.com/mattmc3/antidote.git "$HOME/.antidote"; mark_done "cloned"
+  fi
+}
+
+step_fzf() {
+  if [[ -d "$HOME/.fzf" ]]; then
+    run git -C "$HOME/.fzf" pull --ff-only; mark_done "updated"
+  else
+    run git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"; mark_done "cloned"
+  fi
+  run "$HOME/.fzf/install" --key-bindings --completion --no-update-rc
+}
+
+step_zoxide() {
+  pkg zoxide
+  if command -v zoxide >/dev/null 2>&1 && [[ -f "$HOME/.z" && ! -f "$HOME/Library/Application Support/zoxide/db.zo" && ! -f "$HOME/.local/share/zoxide/db.zo" ]]; then
+    run zoxide import z
+  fi
+}
+
+step_omp() {
+  if [[ "$OS_TYPE" == "Darwin" ]]; then
+    pkg oh-my-posh
+  elif ! command -v oh-my-posh >/dev/null 2>&1; then
+    run bash -c 'curl -s https://ohmyposh.dev/install.sh | bash -s'; mark_done "installed"
+  else
+    have_step "already installed"
+  fi
+  run mkdir -p "$HOME/.config/oh-my-posh"
+  run curl -fsSL "$OMP_THEME_URL" -o "$HOME/.config/oh-my-posh/$OMP_THEME_NAME"
+}
+
+step_font() {
+  if [[ "$OS_TYPE" == "Darwin" ]]; then cask font-meslo-lg-nerd-font; else have_step "macOS only"; fi
+}
+
+font_status() { # font_status <iterm|vscode>: applies the font through share/apply_font.py
+  local out rc=0
+  if dry; then echo "  [dry-run] apply_font.py $1"; return 0; fi
+  out="$(python3 "$REPO_DIR/share/apply_font.py" "$1" 2>&1)" || rc=$?
+  echo "  font $1: $out"
+  case "$rc" in
+    0) mark_done "$out" ;;
+    3) have_step "$out" ;;
+    2) skip_step "$out" ;;
+    *) STEP_STATE=fail; STEP_NOTE="$out" ;;
+  esac
+}
+
+step_font_iterm() { font_status iterm; }
+step_font_terminal() { font_status terminal; }
+step_font_vscode() { font_status vscode; }
+
+step_iterm2() {
+  local dest_dir guid home_escaped
   cask iterm2 /Applications/iTerm.app "$HOME/Applications/iTerm.app"
-  if [[ -f "$ITERM_JSON" ]]; then
-    dest_dir="$HOME/Library/Application Support/iTerm2/DynamicProfiles"
-    guid="$(plutil -extract Guid raw -o - "$ITERM_JSON")"
-    home_escaped="${HOME//\//\\/}"
-    if defaults read com.googlecode.iterm2 "New Bookmarks" 2>/dev/null | grep -q "Guid = \"$guid\""; then
-      echo "  Profile $guid already in iTerm2 preferences; Dynamic Profile skipped."
-      dry || defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$guid"
-    elif dry; then
-      echo "  [dry-run] wrap $ITERM_JSON as a Dynamic Profile -> $dest_dir/Custom.json (Guid=$guid)"
-      echo "  [dry-run] defaults write com.googlecode.iterm2 \"Default Bookmark Guid\" -string $guid"
-    else
-      mkdir -p "$dest_dir"
-      { printf '{"Profiles":['; sed "s#\"Working Directory\" : \"[^\"]*\"#\"Working Directory\" : \"$home_escaped\"#" "$ITERM_JSON"; printf ']}\n'; } > "$dest_dir/Custom.json"
-      defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$guid"
-      echo "  Dynamic profile installed and set as default (Guid=$guid). Restart iTerm2."
-    fi
+  if [[ ! -f "$ITERM_JSON" ]]; then echo "  Skipped: $ITERM_JSON not found."; skip_step "profile file not found"; return 0; fi
+  dest_dir="$HOME/Library/Application Support/iTerm2/DynamicProfiles"
+  guid="$(plutil -extract Guid raw -o - "$ITERM_JSON")"
+  home_escaped="${HOME//\//\\/}"
+  if defaults read com.googlecode.iterm2 "New Bookmarks" 2>/dev/null | grep -q "Guid = \"$guid\""; then
+    echo "  Profile $guid already in iTerm2 preferences; Dynamic Profile skipped."
+    dry || defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$guid"
+  elif dry; then
+    echo "  [dry-run] wrap $ITERM_JSON as a Dynamic Profile -> $dest_dir/Custom.json (Guid=$guid)"
+    echo "  [dry-run] defaults write com.googlecode.iterm2 \"Default Bookmark Guid\" -string $guid"
   else
-    echo "  Skipped: $ITERM_JSON not found."
+    mkdir -p "$dest_dir"
+    { printf '{"Profiles":['; sed "s#\"Working Directory\" : \"[^\"]*\"#\"Working Directory\" : \"$home_escaped\"#" "$ITERM_JSON"; printf ']}\n'; } > "$dest_dir/Custom.json"
+    defaults write com.googlecode.iterm2 "Default Bookmark Guid" -string "$guid"
+    echo "  Dynamic profile installed and set as default (Guid=$guid). Restart iTerm2."
   fi
+}
+
+step_terminalapp() {
+  local profile_name
+  if [[ ! -f "$TERMINAL_FILE" ]]; then echo "  Skipped: $TERMINAL_FILE not found."; skip_step "profile file not found"; return 0; fi
+  profile_name="$(plutil -extract name raw -o - "$TERMINAL_FILE" 2>/dev/null || true)"
+  run /usr/bin/open -g "$TERMINAL_FILE"
+  if [[ -n "$profile_name" ]]; then
+    run defaults write com.apple.Terminal "Default Window Settings" -string "$profile_name"
+    run defaults write com.apple.Terminal "Startup Window Settings" -string "$profile_name"
+    echo "  Profile '$profile_name' imported and set as default. Reopen Terminal.app."
+    mark_done "profile '$profile_name' imported"
+  else
+    echo "  Profile opened/imported; name not detected."
+  fi
+}
+
+# ------------------------------ Plan -------------------------------------------
+if [[ "$ZSHRC_ONLY" == "0" ]]; then
+  if sel homebrew; then queue Tools homebrew  "install / update"        step_homebrew; fi
+  if sel base;    then queue Tools base       "zsh git curl"            step_base; fi
+  if sel antidote; then queue Tools antidote  "plugin manager"          step_antidote; fi
+  if sel fzf;     then queue Tools fzf        "fuzzy finder"            step_fzf; fi
+  if sel zoxide;  then queue Tools zoxide     "smarter cd"              step_zoxide; fi
+  if sel eza;     then queue Tools eza        "ls replacement"          pkg eza; fi
+  if sel bat;     then queue Tools bat        "cat with highlighting"   pkg bat; fi
+  if sel fd;      then queue Tools fd         "fast find"               pkg fd fd-find; fi
+  if sel atuin;   then queue Tools atuin      "shell history"           pkg atuin; fi
+  if sel delta;   then queue Tools git-delta  "readable diffs"          pkg git-delta; fi
+  if sel lazygit; then queue Tools lazygit    "git terminal UI"         pkg lazygit; fi
+  if sel mise;    then queue Tools mise       "tool versions"           pkg mise; fi
+  if sel direnv;  then queue Tools direnv     "per-directory env"       pkg direnv; fi
+  if sel omp;     then queue Tools oh-my-posh "prompt + theme"          step_omp; fi
+  if sel font;    then queue Tools meslo-font "Nerd Font"               step_font; fi
 fi
 
-if sel terminalapp; then
-  echo; echo "== Terminal.app =="
-  if [[ -f "$TERMINAL_FILE" ]]; then
-    profile_name="$(plutil -extract name raw -o - "$TERMINAL_FILE" 2>/dev/null || true)"
-    run /usr/bin/open -g "$TERMINAL_FILE"
-    if [[ -n "$profile_name" ]]; then
-      run defaults write com.apple.Terminal "Default Window Settings" -string "$profile_name"
-      run defaults write com.apple.Terminal "Startup Window Settings" -string "$profile_name"
-      echo "  Profile '$profile_name' imported and set as default. Reopen Terminal.app."
-    else
-      echo "  Profile opened/imported; name not detected."
-    fi
-  else
-    echo "  Skipped: $TERMINAL_FILE not found."
-  fi
+queue "Shell config" zshrc "~/.zshrc" write_zshrc
+if sel antidote; then queue "Shell config" plugin-list "~/.zsh_plugins.txt" write_plugins; fi
+if sel zhelp;    then queue "Shell config" glossary "zhelp glossary" write_glossary; fi
+if [[ "$ZSHRC_ONLY" == "0" ]]; then
+  if sel antidote && [[ "$DRY_RUN" != "1" ]]; then queue "Shell config" plugin-bundle "antidote bundle" build_plugins; fi
+  if sel delta; then queue "Shell config" git-delta "git include file" setup_delta; fi
+  if sel atuin; then queue "Shell config" atuin-import "zsh history" import_atuin_history; fi
 fi
 
-# ------------------------------ Save selection ---------------------------------
+if sel iterm2;      then queue "Terminal apps" iterm2 "app + Custom profile" step_iterm2; fi
+if sel terminalapp; then queue "Terminal apps" terminal.app "Custom profile" step_terminalapp; fi
+if sel font && [[ "$OS_TYPE" == "Darwin" ]]; then
+  if sel iterm2; then queue "Terminal apps" iterm-font "MesloLGS NF Mono 13 in all profiles" step_font_iterm; fi
+  if sel terminalapp; then queue "Terminal apps" terminal-font "MesloLGS NF Mono 13 in all profiles" step_font_terminal; fi
+  queue "Terminal apps" vscode-font "integrated terminal font" step_font_vscode
+fi
+
+# ------------------------------ Run --------------------------------------------
 if [[ "$ZSHRC_ONLY" == "0" ]] && ! dry; then
   mkdir -p "$(dirname "$SELECTION_FILE")"
   (set | grep -E '^SEL_[a-z0-9_]+=[01]$' || true) > "$SELECTION_FILE"
-  echo "Saved module selection -> $SELECTION_FILE"
 fi
 
-# ------------------------------ Done -------------------------------------------
+ui_start
+queue_rc=0
+run_queue || queue_rc=$?
+
 if [[ "$ZSHRC_ONLY" == "0" ]] && sel omp && command -v oh-my-posh >/dev/null 2>&1; then
   run oh-my-posh enable reload
 fi
-echo; echo "Done. Restart your terminal or run 'exec zsh' to apply."
+next_step "exec zsh"
+
+if [[ "$UI_ON" == "1" ]]; then
+  while IFS= read -r line; do if [[ -n "$line" ]]; then ui N "$line"; fi; done <<< "$NEXT_STEPS"
+  ui L "$UI_LOG"
+fi
+ui_stop
+
+if [[ "$UI_USED" == "0" ]]; then
+  if [[ -n "$RECAP" ]]; then echo; echo "Skipped / failed:"; printf '%s' "$RECAP"; fi
+  if [[ "$ZSHRC_ONLY" == "0" ]] && ! dry; then echo; echo "Saved module selection -> $SELECTION_FILE"; fi
+  echo; printf '%s' "$NEXT_STEPS" | sed 's/^/Next: /'
+else
+  echo "Done."
+fi
+exit "$queue_rc"

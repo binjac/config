@@ -324,6 +324,12 @@ emit_zshrc() {
 # user-local binaries (claude, pipx, ...) and opencode
 export PATH="$HOME/.local/bin:$PATH"
 [[ -d "$HOME/.opencode/bin" ]] && export PATH="$HOME/.opencode/bin:$PATH"
+
+# VS Code `code` command
+for __vscode in "$HOME/Applications/Visual Studio Code.app" "/Applications/Visual Studio Code.app"; do
+  [[ -d "$__vscode/Contents/Resources/app/bin" ]] && { export PATH="$PATH:$__vscode/Contents/Resources/app/bin"; break; }
+done
+unset __vscode
 EOF
 
   if sel conda; then cat <<'EOF'

@@ -67,3 +67,7 @@ Dependencies are enabled automatically (fzf-tab needs fzf, the terminal profiles
 ## Secrets
 
 Never put tokens in this repo or in `~/.zshrc`. Copy `.zprofile.example` to `~/.zprofile` (or a `600` file it sources), fill in the values and `chmod 600` it.
+
+## Agent setup
+
+Claude Code and OpenCode share one agnostic home (`~/.agents`) with thin per-tool bridges. Layout and rebuild steps for a new machine: [docs/agents-setup.md](docs/agents-setup.md).
